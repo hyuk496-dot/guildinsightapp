@@ -1,8 +1,38 @@
 @import "tailwindcss";
 
+/* ========================================================
+ * Display 폰트: GmarketSans Bold
+ * 라이선스: 지마켓 산스(상업적 무료) — https://corp.gmarket.com/fonts
+ * 배포: webfontworld/gmarket (jsDelivr CDN)
+ * 사용처: 랜딩 메인 타이틀 등 SaaS 디스플레이 헤드라인
+ * ======================================================== */
+@font-face {
+  font-family: "GmarketSans";
+  src: url("https://cdn.jsdelivr.net/gh/webfontworld/gmarket/GmarketSansBold.woff2")
+      format("woff2"),
+    url("https://cdn.jsdelivr.net/gh/webfontworld/gmarket/GmarketSansBold.woff")
+      format("woff");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "GmarketSans";
+  src: url("https://cdn.jsdelivr.net/gh/webfontworld/gmarket/GmarketSansMedium.woff2")
+      format("woff2"),
+    url("https://cdn.jsdelivr.net/gh/webfontworld/gmarket/GmarketSansMedium.woff")
+      format("woff");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --font-display: "GmarketSans", "Pretendard", "Apple SD Gothic Neo",
+    "Malgun Gothic", system-ui, sans-serif;
 }
 
 @theme inline {
@@ -23,4 +53,25 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* 앱 다크/라이트 — native select·option 대비 */
+[data-theme="dark"] select {
+  color-scheme: dark;
+}
+
+[data-theme="light"] select {
+  color-scheme: light;
+}
+
+[data-theme="dark"] select,
+[data-theme="dark"] select option {
+  background-color: #0d1a2a;
+  color: #00c8ff;
+}
+
+[data-theme="light"] select,
+[data-theme="light"] select option {
+  background-color: #ffffff;
+  color: #185fa5;
 }

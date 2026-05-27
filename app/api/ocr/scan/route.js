@@ -9,8 +9,11 @@ import {
   summarizeOcrRows,
 } from "@/lib/ocr-parse";
 import { getServerSupabase } from "@/lib/supabase-server";
-import { getAdminSupabase } from "@/lib/supabase-admin";
-import { isOcrQuotaExempt } from "@/lib/ocr-quota";
+import {
+  assertAuthenticatedUserId,
+  assertCanConsumeOcrScan,
+  consumeOcrScanForUser,
+} from "@/lib/ocr-quota-server";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = new Set(["image/jpeg", "image/png"]);
@@ -23,11 +26,28 @@ export async function POST(request) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) {
+
+  if (!user?.id || !assertAuthenticatedUserId(user.id)) {
     return NextResponse.json({ error: "인증 필요" }, { status: 401 });
   }
 
+  const userId = user.id;
+  const userEmail = user.email ?? "";
+
   try {
+    let quota;
+    try {
+      quota = await assertCanConsumeOcrScan(userId, userEmail);
+    } catch (quotaErr) {
+      if (quotaErr.code === "OCR_QUOTA_EXCEEDED") {
+        return NextResponse.json(
+          { error: QUOTA_ERROR, code: "OCR_QUOTA_EXCEEDED" },
+          { status: 403 }
+        );
+      }
+      throw quotaErr;
+    }
+
     const formData = await request.formData();
     const file = formData.get("image");
 
@@ -49,22 +69,6 @@ export async function POST(request) {
       );
     }
 
-    const { data: profile, error: profileErr } = await supabase
-      .from("profiles")
-      .select("free_ocr_count, email")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profileErr) throw profileErr;
-
-    const exempt = isOcrQuotaExempt(profile, user.email);
-    if (!exempt) {
-      const left = Number(profile?.free_ocr_count ?? 0);
-      if (!Number.isFinite(left) || left <= 0) {
-        return NextResponse.json({ error: QUOTA_ERROR, code: "OCR_QUOTA_EXCEEDED" }, { status: 403 });
-      }
-    }
-
     const guildIdRaw = formData.get("guild_id");
     const contentName = (formData.get("content_name") || "").toString().trim() || null;
     const guildId =
@@ -78,7 +82,7 @@ export async function POST(request) {
     const parserOptions = {
       contentName: contentName || null,
       knownGuilds: undefined,
-      debug: true,
+      debug: process.env.NODE_ENV !== "production",
     };
 
     let rows = parseVisionAnnotations(textAnnotations, parserOptions);
@@ -94,20 +98,15 @@ export async function POST(request) {
 
     const summary = summarizeOcrRows(rows);
 
-    if (!exempt) {
+    if (!quota.unlimited) {
       try {
-        const admin = getAdminSupabase();
-        const { data: remaining, error: consumeErr } = await admin.rpc(
-          "gi_consume_free_ocr_scan",
-          { p_user_id: user.id }
+        await consumeOcrScanForUser(userId);
+      } catch (consumeErr) {
+        console.error("free_ocr consume 실패:", consumeErr.message || consumeErr);
+        return NextResponse.json(
+          { error: "스캔 횟수 차감에 실패했습니다. 다시 시도해 주세요." },
+          { status: 500 }
         );
-        if (consumeErr) {
-          console.error("free_ocr consume 실패:", consumeErr);
-        } else if (remaining === 0 && Number(profile?.free_ocr_count ?? 0) <= 0) {
-          console.warn("free_ocr: consume skipped at 0 for", user.id);
-        }
-      } catch (consumeBlock) {
-        console.error("free_ocr consume:", consumeBlock);
       }
     }
 
@@ -121,7 +120,13 @@ export async function POST(request) {
       contentName,
     });
   } catch (error) {
-    console.error("OCR 스캔 에러:", error);
+    if (error.code === "OCR_QUOTA_EXCEEDED") {
+      return NextResponse.json(
+        { error: QUOTA_ERROR, code: "OCR_QUOTA_EXCEEDED" },
+        { status: 403 }
+      );
+    }
+    console.error("OCR 스캔 에러:", error.message || error);
     return NextResponse.json(
       { error: error.message || "OCR 처리 중 오류가 발생했습니다." },
       { status: 500 }

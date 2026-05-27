@@ -8,10 +8,10 @@ import { createServerClient } from "@supabase/ssr";
  *
  * 보호 경로:
  *   /dashboard, /members, /scores, /contribution, /simulation,
- *   /gptreport, /ocr, /guild, /billing
+ *   /gptreport, /ocr, /guild
  *
  * 공개 경로:
- *   / (랜딩), /auth/callback, /auth/error, /unauthorized,
+ *   / (랜딩), /billing, /demo, /auth/callback, /auth/error, /unauthorized,
  *   정적 파일, _next 내부 경로, /api/auth/*
  */
 
@@ -24,7 +24,6 @@ const PROTECTED_PREFIXES = [
   "/gptreport",
   "/ocr",
   "/guild",
-  "/billing",
 ];
 
 export async function middleware(request: NextRequest) {
@@ -66,7 +65,7 @@ export async function middleware(request: NextRequest) {
 
   if (isProtected && !user) {
     const url = request.nextUrl.clone();
-    url.pathname = "/";
+    url.pathname = "/billing";
     url.searchParams.set("auth", "required");
     return NextResponse.redirect(url);
   }

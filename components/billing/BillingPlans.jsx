@@ -1,7 +1,7 @@
 'use client';
 
 import Link from "next/link";
-import { useGuildInsight } from "@/context/GuildInsightProvider";
+import { THEMES } from "@/lib/theme";
 
 const PLANS = [
   {
@@ -52,8 +52,7 @@ const PLANS = [
   },
 ];
 
-export default function BillingPage() {
-  const { t } = useGuildInsight();
+export function BillingPlans({ t = THEMES.dark }) {
   const gradient = `linear-gradient(135deg, ${t.accent} 0%, ${t.up} 100%)`;
 
   return (
@@ -70,7 +69,15 @@ export default function BillingPage() {
           }}
         >
           <div>
-            <div style={{ fontSize: 11, color: t.accent, letterSpacing: "0.08em", fontWeight: 500, marginBottom: 6 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: t.accent,
+                letterSpacing: "0.08em",
+                fontWeight: 500,
+                marginBottom: 6,
+              }}
+            >
               BILLING · 요금제
             </div>
             <h1 style={{ fontSize: 24, fontWeight: 600, color: t.text, margin: 0, marginBottom: 6 }}>
@@ -165,30 +172,41 @@ export default function BillingPage() {
               </div>
               <div style={{ fontSize: 11, color: t.textSub, marginBottom: 16 }}>{p.note}</div>
 
-              <ul style={{ margin: 0, padding: 0, listStyle: "none", marginBottom: 18, display: "flex", flexDirection: "column", gap: 8 }}>
+              <ul
+                style={{
+                  margin: 0,
+                  padding: 0,
+                  listStyle: "none",
+                  marginBottom: 18,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
                 {p.perks.map((perk) => {
                   const isOcrPerk = /OCR/i.test(perk);
                   return (
-                  <li
-                    key={perk}
-                    style={{
-                      fontSize: isOcrPerk ? 12.5 : 12,
-                      color: isOcrPerk ? t.text : t.textSub,
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 8,
-                      lineHeight: 1.5,
-                      fontWeight: isOcrPerk ? 500 : 400,
-                    }}
-                  >
-                    <span style={{ color: isOcrPerk ? t.accent : t.up, marginTop: 1 }}>✓</span>
-                    <span>{perk}</span>
-                  </li>
+                    <li
+                      key={perk}
+                      style={{
+                        fontSize: isOcrPerk ? 12.5 : 12,
+                        color: isOcrPerk ? t.text : t.textSub,
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 8,
+                        lineHeight: 1.5,
+                        fontWeight: isOcrPerk ? 500 : 400,
+                      }}
+                    >
+                      <span style={{ color: isOcrPerk ? t.accent : t.up, marginTop: 1 }}>✓</span>
+                      <span>{perk}</span>
+                    </li>
                   );
                 })}
               </ul>
 
               <button
+                type="button"
                 disabled={p.disabled}
                 onClick={() => {
                   alert(

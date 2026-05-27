@@ -409,3 +409,8 @@ export function useGuildInsight() {
   if (!ctx) throw new Error("useGuildInsight must be used within GuildInsightProvider");
   return ctx;
 }
+
+/** Provider 밖(게스트 빌링 등)에서도 안전하게 테마/유저를 읽을 때 */
+export function useOptionalGuildInsight() {
+  return useContext(GuildInsightContext);
+}

@@ -1,6 +1,8 @@
 'use client';
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { LandingFooter } from "@/components/landing/LandingFooter";
+import { ToastProvider, useToast, LOGIN_REQUIRED_TOAST } from "@/components/shared/Toast";
 
 const C = "#00c8ff";
 
@@ -21,6 +23,30 @@ const RADAR_AXES = ["점수관리", "기여도", "OCR", "GPT", "시뮬", "대시
 const RADAR_VALS = [0.92, 0.85, 0.88, 0.78, 0.82, 0.95];
 
 export function LandingPage() {
+  return (
+    <ToastProvider>
+      <Suspense fallback={<LandingPageInner />}>
+        <LandingAuthToast />
+      </Suspense>
+      <LandingPageInner />
+    </ToastProvider>
+  );
+}
+
+function LandingAuthToast() {
+  const searchParams = useSearchParams();
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    if (searchParams.get("auth") === "required" || searchParams.get("login") === "1") {
+      showToast(LOGIN_REQUIRED_TOAST);
+    }
+  }, [searchParams, showToast]);
+
+  return null;
+}
+
+function LandingPageInner() {
   const router = useRouter();
 
   const gridCanvasRef = useRef(null);
@@ -265,6 +291,9 @@ export function LandingPage() {
     );
   };
 
+  const scrollToFeatures = () => {
+    document.getElementById("features-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <div id="app">
@@ -284,9 +313,21 @@ export function LandingPage() {
           </div>
         </div>
         <div className="nav-links">
-          <span className="nav-link">FEATURES</span>
-          <span className="nav-link">DEMO</span>
-          <span className="nav-link" onClick={() => router.push("/gptreport/compare")}>PRICING</span>
+          <span className="nav-link" onClick={scrollToFeatures} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && scrollToFeatures()}>
+            FEATURES
+          </span>
+          <span
+            className="nav-link"
+            onClick={() => router.push("/demo/dashboard")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === "Enter" && router.push("/demo/dashboard")}
+          >
+            DEMO
+          </span>
+          <span className="nav-link" onClick={() => router.push("/billing")} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && router.push("/billing")}>
+            PRICING
+          </span>
         </div>
         <div
           className="lock-btn"
@@ -358,11 +399,13 @@ export function LandingPage() {
       </div>
 
       {/* FEATURE CARDS */}
-      <div className="cards-row">
+      <div id="features-section" className="cards-row">
         <FeatCard name="OCR 점수 추출" desc="스크린샷 업로드만으로 점수 자동 인식 및 DB 저장" bar={92} icon={<OcrIcon />} />
         <FeatCard name="기여도 분석" desc="길드원별 점수 상승률·기여 비중을 시각화 차트로 제공" bar={78} icon={<TrendIcon />} />
         <FeatCard name="GPT 리포트" desc="매주 AI가 작성하는 운영 분석 리포트 & 전략 제안" bar={85} icon={<TriangleIcon />} />
       </div>
+
+      <LandingFooter />
 
       {/* LOGIN MODAL */}
       <div
@@ -530,8 +573,12 @@ export function LandingPage() {
           background: #080c14;
           min-height: 100vh;
           position: relative;
-          overflow: hidden;
+          overflow-x: hidden;
+          overflow-y: auto;
           color: #e8f4ff;
+        }
+        html {
+          scroll-behavior: smooth;
         }
         .grid-bg {
           position: absolute;

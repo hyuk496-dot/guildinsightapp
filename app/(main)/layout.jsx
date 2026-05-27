@@ -24,7 +24,7 @@ export default async function MainLayout({ children }) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    redirect("/?auth=required");
+    redirect("/billing?auth=required");
   }
 
   const h = await headers();

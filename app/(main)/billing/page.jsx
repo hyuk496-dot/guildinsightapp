@@ -9,7 +9,13 @@ const PLANS = [
     name: "Starter",
     price: "Free",
     note: "데모 리포트 무제한",
-    perks: ["로컬 데모 리포트", "최근 4주 통계", "수동 점수 입력", "기본 OCR"],
+    perks: [
+      "로컬 데모 리포트",
+      "최근 4주 통계",
+      "수동 점수 입력",
+      "무료 이미지 OCR (최대 3회)",
+      "엑셀 데이터 가져오기 무제한",
+    ],
     cta: "현재 플랜",
     disabled: true,
   },
@@ -20,6 +26,7 @@ const PLANS = [
     period: "/월",
     note: "운영자 1인 · 길드 1개",
     perks: [
+      "AI 프리미엄 OCR 무제한",
       "AI 프리미엄 리포트 50회/월",
       "GPT-4o 기반 맥락 분석",
       "PDF 출력 · Slack/Discord 공유 (예정)",
@@ -35,6 +42,7 @@ const PLANS = [
     period: "/월",
     note: "운영팀 5인 · 길드 3개",
     perks: [
+      "AI 프리미엄 OCR 무제한",
       "AI 프리미엄 리포트 무제한",
       "다중 길드 동시 분석",
       "팀원 권한 관리",
@@ -158,22 +166,26 @@ export default function BillingPage() {
               <div style={{ fontSize: 11, color: t.textSub, marginBottom: 16 }}>{p.note}</div>
 
               <ul style={{ margin: 0, padding: 0, listStyle: "none", marginBottom: 18, display: "flex", flexDirection: "column", gap: 8 }}>
-                {p.perks.map((perk) => (
+                {p.perks.map((perk) => {
+                  const isOcrPerk = /OCR/i.test(perk);
+                  return (
                   <li
                     key={perk}
                     style={{
-                      fontSize: 12,
-                      color: t.textSub,
+                      fontSize: isOcrPerk ? 12.5 : 12,
+                      color: isOcrPerk ? t.text : t.textSub,
                       display: "flex",
                       alignItems: "flex-start",
                       gap: 8,
                       lineHeight: 1.5,
+                      fontWeight: isOcrPerk ? 500 : 400,
                     }}
                   >
-                    <span style={{ color: t.up, marginTop: 1 }}>✓</span>
+                    <span style={{ color: isOcrPerk ? t.accent : t.up, marginTop: 1 }}>✓</span>
                     <span>{perk}</span>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
 
               <button

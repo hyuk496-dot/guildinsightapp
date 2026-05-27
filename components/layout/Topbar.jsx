@@ -1,14 +1,66 @@
 'use client';
 
+import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { TR } from "@/lib/theme";
 import { ROUTES } from "@/lib/navigation";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
 
+const ZOOM_MIN = 0.9;
+const ZOOM_MAX = 1.5;
+
+function ZoomIcon({ color }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="10.5" cy="10.5" r="6.25" stroke={color} strokeWidth="1.75" />
+      <path d="M15.2 15.2L20 20" stroke={color} strokeWidth="1.75" strokeLinecap="round" />
+      <path d="M10.5 7.5v6M7.5 10.5h6" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function Topbar({ t, dark, setDark, title, sub, onLogout }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { guilds } = useGuildInsight();
+  const { guilds, zoom, zoomIn, zoomOut, setZoom } = useGuildInsight();
+  const [mounted, setMounted] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const zoomWrapRef = useRef(null);
+
+  const zoomLevel = mounted ? (zoom ?? 1) : 1;
+  const zoomPct = Math.round(zoomLevel * 100);
+  const atMin = zoomLevel <= ZOOM_MIN;
+  const atMax = zoomLevel >= ZOOM_MAX;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!zoomOpen) return;
+    const onPointerDown = (e) => {
+      if (zoomWrapRef.current && !zoomWrapRef.current.contains(e.target)) {
+        setZoomOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [zoomOpen]);
+
+  const zoomBtn = {
+    padding: "4px 10px",
+    border: `1px solid ${t.borderStrong}`,
+    borderRadius: 6,
+    background: t.accentFaint,
+    color: t.accent,
+    fontSize: 11,
+    fontFamily: "'Courier New',monospace",
+    cursor: "pointer",
+    transition: TR,
+    lineHeight: 1,
+    minWidth: 28,
+  };
+
   const hasNoGuild = (guilds?.length ?? 0) === 0;
 
   const guardedNav = (target) => () => {
@@ -102,6 +154,89 @@ export function Topbar({ t, dark, setDark, title, sub, onLogout }) {
         >
           GPT 리포트
         </button>
+
+        <div ref={zoomWrapRef} style={{ position: "relative" }}>
+          <button
+            type="button"
+            onClick={() => setZoomOpen((o) => !o)}
+            title="화면 확대/축소"
+            aria-label="화면 확대/축소"
+            aria-expanded={zoomOpen}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 30,
+              height: 30,
+              padding: 0,
+              border: `1px solid ${zoomOpen ? t.accent : t.border}`,
+              borderRadius: 7,
+              background: zoomOpen ? t.accentFaint : t.accentFainter,
+              color: t.accent,
+              cursor: "pointer",
+              transition: TR,
+            }}
+          >
+            <ZoomIcon color={t.accent} />
+          </button>
+          {zoomOpen && (
+            <div
+              role="dialog"
+              aria-label="화면 배율 조절"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                right: 0,
+                zIndex: 50,
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: `1px solid ${t.borderStrong}`,
+                background: t.navBg,
+                boxShadow: `0 8px 24px ${dark ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.12)"}`,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <button
+                type="button"
+                onClick={zoomOut}
+                disabled={atMin}
+                style={{
+                  ...zoomBtn,
+                  opacity: atMin ? 0.35 : 1,
+                  cursor: atMin ? "not-allowed" : "pointer",
+                }}
+                aria-label="축소"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoom(1)}
+                style={{ ...zoomBtn, minWidth: 52, fontWeight: 500 }}
+                aria-label="100%로 초기화"
+                suppressHydrationWarning
+              >
+                {zoomPct}%
+              </button>
+              <button
+                type="button"
+                onClick={zoomIn}
+                disabled={atMax}
+                style={{
+                  ...zoomBtn,
+                  opacity: atMax ? 0.35 : 1,
+                  cursor: atMax ? "not-allowed" : "pointer",
+                }}
+                aria-label="확대"
+              >
+                +
+              </button>
+            </div>
+          )}
+        </div>
+
         <div style={{ width: 1, height: 18, background: t.border, margin: "0 2px" }} />
         <button
           onClick={onLogout}

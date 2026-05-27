@@ -236,10 +236,51 @@ export function OcrUpload({
 
   if (!ocrSession?.rows?.length) {
     return (
-      <div style={{ flex: 1, padding: "24px 28px", color: t.textMuted, fontSize: 13 }}>
-        <p style={{ marginBottom: 12 }}>인식·가져오기 결과가 없습니다.</p>
-        <Link href={ROUTES.ocrUpload} style={{ color: t.accent, fontSize: 12 }}>
-          파일 업로드 →
+      <div className="flex flex-1 flex-col items-center justify-center min-h-[450px] px-6 py-12">
+        <svg
+          className="mb-6 h-16 w-16 text-blue-400 opacity-40"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.25"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <circle cx="11.5" cy="14.5" r="2.5" />
+          <path d="M13.5 16.5L16 19" />
+        </svg>
+        <h2 className="text-center text-xl font-semibold text-slate-800 dark:text-slate-100">
+          아직 불러온 스캔 결과가 없습니다
+        </h2>
+        <p className="mt-3 mb-8 max-w-md text-center text-sm text-slate-400 leading-relaxed">
+          인게임 결과 스크린샷이나 엑셀 데이터를 업로드하면 AI가 점수를 분석하여 대시보드에
+          반영합니다.
+        </p>
+        <Link
+          href={ROUTES.ocrUpload}
+          className="inline-flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-600/10 px-5 py-2.5 font-medium text-blue-400 transition-all hover:border-blue-400/50 hover:bg-blue-600 hover:text-white"
+        >
+          <svg
+            className="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          데이터 가져오기
+          <span className="text-blue-300/80" aria-hidden>
+            +
+          </span>
         </Link>
       </div>
     );

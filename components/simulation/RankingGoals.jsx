@@ -21,6 +21,8 @@ function formatNum(n) {
   return Number(n || 0).toLocaleString();
 }
 
+const BOOST_STEP = 100_000; // 10만 단위 정밀 조절
+
 export function RankingGoals({ t, guilds, activeGuild }) {
   const [guildId, setGuildId] = useState(activeGuild?.id ?? guilds[0]?.id);
   const [content, setContent] = useState(CONTENTS_INIT[0]);
@@ -117,6 +119,22 @@ export function RankingGoals({ t, guilds, activeGuild }) {
     const v = Math.max(0, Math.min(MAX_BOOST, Math.round(Number(value) || 0)));
     setBoost(v);
     setBoostInput(String(v));
+  };
+
+  const onBoostInputChange = (e) => {
+    const raw = e.target.value;
+    // 사용자가 지우는 중에도 입력 UX가 깨지지 않게 처리
+    if (raw === "") {
+      setBoostInput("");
+      setBoost(0);
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      setBoostInput(raw);
+      return;
+    }
+    applyBoost(n);
   };
 
   const applyPreset = (key) => {
@@ -461,27 +479,26 @@ export function RankingGoals({ t, guilds, activeGuild }) {
               </div>
               <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 12 }}>
                 기준 총점 {formatNum(baseForSim)}
-                {activePreset ? " (시나리오 적용)" : " (DB)"} + 가산 0 ~ 1,000만
+                {activePreset ? " (시나리오 적용)" : " (DB)"} + 가산 0 ~ 10억
               </div>
               <input
                 type="range"
                 min={0}
                 max={MAX_BOOST}
-                step={100_000}
+                step={BOOST_STEP}
                 value={boost}
                 onChange={(e) => applyBoost(e.target.value)}
                 style={{ width: "100%", marginBottom: 10 }}
               />
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
-                  type="text"
-                  inputMode="numeric"
+                  type="number"
+                  min={0}
+                  max={MAX_BOOST}
+                  step={BOOST_STEP}
                   value={boostInput}
-                  onChange={(e) => setBoostInput(e.target.value.replace(/[^\d]/g, ""))}
-                  onBlur={() => applyBoost(boostInput)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") applyBoost(boostInput);
-                  }}
+                  onChange={onBoostInputChange}
+                  onBlur={() => applyBoost(boostInput === "" ? 0 : boostInput)}
                   style={{
                     flex: 1,
                     padding: "8px 10px",

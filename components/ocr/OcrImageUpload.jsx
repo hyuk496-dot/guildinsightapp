@@ -1,6 +1,9 @@
 'use client';
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import Link from "next/link";
 import { selectStyle, optionStyle } from "@/lib/styles";
+import { Modal } from "@/components/shared/Modal";
+import { FREE_OCR_MAX } from "@/lib/ocr-quota";
 import { ExcelColumnMapping } from "./ExcelColumnMapping";
 import {
   parseExcelFile,
@@ -44,12 +47,44 @@ export function OcrImageUpload({
   const [contentName, setContentName] = useState(
     defaultContentName ?? contents[0] ?? "총력전"
   );
+  const [ocrQuota, setOcrQuota] = useState({
+    remaining: 0,
+    max: FREE_OCR_MAX,
+    unlimited: false,
+    loading: true,
+  });
+  const [limitModalOpen, setLimitModalOpen] = useState(false);
+
+  const fetchOcrQuota = useCallback(async () => {
+    try {
+      const res = await fetch("/api/ocr/quota");
+      if (!res.ok) return;
+      const data = await res.json();
+      setOcrQuota({
+        remaining: data.remaining ?? 0,
+        max: data.max ?? FREE_OCR_MAX,
+        unlimited: !!data.unlimited,
+        loading: false,
+      });
+    } catch {
+      setOcrQuota((q) => ({ ...q, loading: false }));
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOcrQuota();
+  }, [fetchOcrQuota]);
 
   useEffect(() => {
     if (defaultGuildId != null && defaultGuildId !== guildId) {
       setGuildId(defaultGuildId);
     }
   }, [defaultGuildId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const imageQuotaBlocked =
+    ocrQuota.loading || (!ocrQuota.unlimited && ocrQuota.remaining <= 0);
+
+  const openLimitModal = () => setLimitModalOpen(true);
 
   const resetExcelState = () => {
     setExcelHeaders([]);
@@ -69,6 +104,11 @@ export function OcrImageUpload({
     }
     if (f.size > MAX_BYTES) {
       alert("파일 크기는 최대 10MB까지 가능합니다.");
+      return;
+    }
+
+    if (kind === "image" && imageQuotaBlocked) {
+      openLimitModal();
       return;
     }
 
@@ -115,6 +155,10 @@ export function OcrImageUpload({
       alert("이미지를 먼저 업로드해주세요.");
       return;
     }
+    if (imageQuotaBlocked) {
+      openLimitModal();
+      return;
+    }
     setScanning(true);
     setScanProgress(0);
 
@@ -139,6 +183,14 @@ export function OcrImageUpload({
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (res.status === 403 && (data.code === "OCR_QUOTA_EXCEEDED" || data.error?.includes("소진"))) {
+          setOcrQuota((q) => ({ ...q, remaining: 0, loading: false }));
+          openLimitModal();
+          clearInterval(progressIv);
+          setScanning(false);
+          setScanProgress(0);
+          return;
+        }
         throw new Error(data.error || "OCR 스캔에 실패했습니다.");
       }
       if (!data.rows?.length) {
@@ -149,6 +201,8 @@ export function OcrImageUpload({
 
       clearInterval(progressIv);
       setScanProgress(100);
+
+      await fetchOcrQuota();
 
       setTimeout(() => {
         onScanComplete({
@@ -240,10 +294,60 @@ export function OcrImageUpload({
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18 }}>
       {/* 페이지 헤더 */}
-      <div>
-        <div style={{ fontSize: 16, fontWeight: 500, color: t.text, marginBottom: 4 }}>점수 데이터 업로드</div>
-        <div style={{ fontSize: 11, color: t.textMuted }}>
-          스크린샷(OCR) 또는 엑셀 파일로 길드 점수를 가져올 수 있습니다
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 500, color: t.text, marginBottom: 4 }}>
+            점수 데이터 업로드
+          </div>
+          <div style={{ fontSize: 11, color: t.textMuted }}>
+            스크린샷(OCR) 또는 엑셀 파일로 길드 점수를 가져올 수 있습니다
+          </div>
+        </div>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 12px",
+            borderRadius: 20,
+            border: `1px solid ${imageQuotaBlocked ? "rgba(255,91,91,0.35)" : t.borderStrong}`,
+            background: imageQuotaBlocked ? "rgba(255,91,91,0.08)" : t.accentFaint,
+            fontSize: 10,
+            color: imageQuotaBlocked ? "#ff8a8a" : t.accentDim,
+            fontFamily: "'Courier New',monospace",
+            letterSpacing: "0.04em",
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: imageQuotaBlocked ? "#ff5b5b" : t.up,
+              flexShrink: 0,
+            }}
+          />
+          {ocrQuota.loading ? (
+            "잔여 횟수 확인 중…"
+          ) : (
+            <>
+              남은 무료 이미지 스캔:{" "}
+              <strong style={{ color: imageQuotaBlocked ? "#ff7070" : t.accent }}>
+                {ocrQuota.unlimited ? "무제한" : `${ocrQuota.remaining}회`}
+              </strong>{" "}
+              / {ocrQuota.max}회
+              <span style={{ color: t.textMuted, marginLeft: 4 }}>(엑셀 업로드는 무제한)</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -622,7 +726,7 @@ export function OcrImageUpload({
           ) : (
             <button
               onClick={startScan}
-              disabled={!file || fileKind !== "image" || scanning}
+              disabled={!file || fileKind !== "image" || scanning || imageQuotaBlocked}
               style={{
                 width: "100%",
                 padding: "13px",
@@ -816,6 +920,58 @@ export function OcrImageUpload({
           </div>
         </div>
       </div>
+
+      <Modal open={limitModalOpen} onClose={() => setLimitModalOpen(false)} t={t} title="무료 이용 한도 도달">
+        <p style={{ fontSize: 12, color: t.textSub, lineHeight: 1.75, margin: "0 0 20px" }}>
+          무료 이용 횟수(3회)를 모두 소진하셨습니다. 지속적인 이미지 분석을 위해 플랜을 업그레이드해
+          주세요!
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Link
+            href="/gptreport/compare"
+            onClick={() => setLimitModalOpen(false)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "12px 16px",
+              borderRadius: 10,
+              border: `1px solid ${t.borderStrong}`,
+              background: t.accentFaint,
+              color: t.accent,
+              fontSize: 12,
+              fontWeight: 600,
+              textDecoration: "none",
+              fontFamily: "'Courier New',monospace",
+              letterSpacing: "0.04em",
+            }}
+          >
+            플랜 비교하기
+          </Link>
+          <Link
+            href="/billing"
+            onClick={() => setLimitModalOpen(false)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "12px 16px",
+              borderRadius: 10,
+              border: "none",
+              background: `linear-gradient(135deg, ${t.accent} 0%, ${t.up} 100%)`,
+              color: "#04101c",
+              fontSize: 12,
+              fontWeight: 700,
+              textDecoration: "none",
+              fontFamily: "'Courier New',monospace",
+              letterSpacing: "0.04em",
+              boxShadow: "0 6px 20px rgba(0,200,255,0.25)",
+            }}
+          >
+            구독 요금제 보기
+          </Link>
+        </div>
+      </Modal>
 
       <style>{`
         @keyframes scanLine { 0%{top:0%} 50%{top:95%} 100%{top:0%} }

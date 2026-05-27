@@ -14,6 +14,26 @@ import { formatScoresFromApi } from "@/lib/radar-utils";
 
 const GuildInsightContext = createContext(null);
 
+const ZOOM_KEY = "gi.ui.zoom";
+const ZOOM_MIN = 0.9;
+const ZOOM_MAX = 1.5;
+const ZOOM_STEP = 0.1;
+
+function clampZoom(v) {
+  const n = Math.round(Number(v) * 10) / 10;
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
+}
+
+function readStoredZoom() {
+  if (typeof window === "undefined") return 1;
+  try {
+    return clampZoom(localStorage.getItem(ZOOM_KEY) || 1);
+  } catch {
+    return 1;
+  }
+}
+
 export function GuildInsightProvider({
   children,
   initialGuilds = [],
@@ -21,7 +41,34 @@ export function GuildInsightProvider({
 }) {
   const router = useRouter();
   const [dark, setDark] = useState(true);
+  const [zoom, setZoomState] = useState(1);
   const t = dark ? THEMES.dark : THEMES.light;
+
+  useEffect(() => {
+    setZoomState(readStoredZoom());
+  }, []);
+
+  useEffect(() => {
+    document.body.style.zoom = String(zoom);
+    try {
+      localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch {}
+    return () => {
+      document.body.style.zoom = "";
+    };
+  }, [zoom]);
+
+  const setZoom = useCallback((next) => {
+    setZoomState((z) => clampZoom(typeof next === "function" ? next(z) : next));
+  }, []);
+  const zoomIn = useCallback(
+    () => setZoom((z) => clampZoom(z + ZOOM_STEP)),
+    [setZoom]
+  );
+  const zoomOut = useCallback(
+    () => setZoom((z) => clampZoom(z - ZOOM_STEP)),
+    [setZoom]
+  );
 
   // 서버에서 RLS 로 필터링된 길드만 받아 시작 상태로 사용
   const normalizedInitial = (initialGuilds || []).map((g) => ({
@@ -292,6 +339,10 @@ export function GuildInsightProvider({
     () => ({
       dark,
       setDark,
+      zoom,
+      setZoom,
+      zoomIn,
+      zoomOut,
       t,
       user,
       guilds,
@@ -322,6 +373,10 @@ export function GuildInsightProvider({
     }),
     [
       dark,
+      zoom,
+      setZoom,
+      zoomIn,
+      zoomOut,
       t,
       user,
       guilds,

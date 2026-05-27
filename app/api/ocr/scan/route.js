@@ -9,16 +9,20 @@ import {
   summarizeOcrRows,
 } from "@/lib/ocr-parse";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { getAdminSupabase } from "@/lib/supabase-admin";
+import { isOcrQuotaExempt } from "@/lib/ocr-quota";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = new Set(["image/jpeg", "image/png"]);
+const QUOTA_ERROR = "무료 이미지 스캔 횟수를 모두 소진하셨습니다.";
 
 export async function POST(request) {
   const started = Date.now();
 
-  // 인증 확인 — 로그인 안 한 사용자는 OCR 호출 불가
   const supabase = await getServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "인증 필요" }, { status: 401 });
   }
@@ -45,7 +49,22 @@ export async function POST(request) {
       );
     }
 
-    // 사용자가 업로드 화면에서 미리 선택한 길드/컨텐츠 (선택 사항)
+    const { data: profile, error: profileErr } = await supabase
+      .from("profiles")
+      .select("free_ocr_count, email")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileErr) throw profileErr;
+
+    const exempt = isOcrQuotaExempt(profile, user.email);
+    if (!exempt) {
+      const left = Number(profile?.free_ocr_count ?? 0);
+      if (!Number.isFinite(left) || left <= 0) {
+        return NextResponse.json({ error: QUOTA_ERROR, code: "OCR_QUOTA_EXCEEDED" }, { status: 403 });
+      }
+    }
+
     const guildIdRaw = formData.get("guild_id");
     const contentName = (formData.get("content_name") || "").toString().trim() || null;
     const guildId =
@@ -56,10 +75,9 @@ export async function POST(request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const { fullText, textAnnotations } = await runVisionOcr(buffer);
 
-    // 콘텐츠별 파서 옵션 (공성전: 2단 분할 + rank+score 필수 strict 모드)
     const parserOptions = {
       contentName: contentName || null,
-      knownGuilds: undefined, // 추후 DB 에서 주입 가능
+      knownGuilds: undefined,
       debug: true,
     };
 
@@ -75,6 +93,23 @@ export async function POST(request) {
     }));
 
     const summary = summarizeOcrRows(rows);
+
+    if (!exempt) {
+      try {
+        const admin = getAdminSupabase();
+        const { data: remaining, error: consumeErr } = await admin.rpc(
+          "gi_consume_free_ocr_scan",
+          { p_user_id: user.id }
+        );
+        if (consumeErr) {
+          console.error("free_ocr consume 실패:", consumeErr);
+        } else if (remaining === 0 && Number(profile?.free_ocr_count ?? 0) <= 0) {
+          console.warn("free_ocr: consume skipped at 0 for", user.id);
+        }
+      } catch (consumeBlock) {
+        console.error("free_ocr consume:", consumeBlock);
+      }
+    }
 
     return NextResponse.json({
       rows,

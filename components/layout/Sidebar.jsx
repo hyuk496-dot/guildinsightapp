@@ -29,6 +29,9 @@ export function Sidebar({ t, guildName }) {
     if (id === "ocr") {
       return pathname === ROUTES.ocr;
     }
+    if (id === "rankingGoals") {
+      return pathname === ROUTES.simulation;
+    }
     return pathname === route;
   };
 

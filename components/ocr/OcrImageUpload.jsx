@@ -1,29 +1,107 @@
 'use client';
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { selectStyle, optionStyle } from "@/lib/styles";
+import { ExcelColumnMapping } from "./ExcelColumnMapping";
+import {
+  parseExcelFile,
+  guessColumnMapping,
+  excelRowsToOcrFormat,
+  SKIP_VALUE,
+} from "@/lib/excel-import";
 
-export function OcrImageUpload({ t, onScanComplete }) {
+const MAX_BYTES = 10 * 1024 * 1024;
+
+function getFileKind(file) {
+  const name = file.name.toLowerCase();
+  if (/\.(xlsx|xls)$/.test(name)) return "excel";
+  if (/\.(jpe?g|png)$/.test(name) || file.type.startsWith("image/")) return "image";
+  return null;
+}
+
+export function OcrImageUpload({
+  t,
+  onScanComplete,
+  guilds = [],
+  contents = [],
+  defaultGuildId = null,
+  defaultContentName = null,
+}) {
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState(null);
+  const [fileKind, setFileKind] = useState(null);
   const [preview, setPreview] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+  const [excelLoading, setExcelLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [excelHeaders, setExcelHeaders] = useState([]);
+  const [excelDataRows, setExcelDataRows] = useState([]);
+  const [excelColIndex, setExcelColIndex] = useState({});
+  const [excelMapping, setExcelMapping] = useState({});
   const fileRef = useRef(null);
 
-  const handleFile = (f) => {
+  const [guildId, setGuildId] = useState(defaultGuildId ?? guilds[0]?.id ?? "");
+  const [contentName, setContentName] = useState(
+    defaultContentName ?? contents[0] ?? "총력전"
+  );
+
+  useEffect(() => {
+    if (defaultGuildId != null && defaultGuildId !== guildId) {
+      setGuildId(defaultGuildId);
+    }
+  }, [defaultGuildId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resetExcelState = () => {
+    setExcelHeaders([]);
+    setExcelDataRows([]);
+    setExcelColIndex({});
+    setExcelMapping({});
+    setExcelLoading(false);
+    setImporting(false);
+  };
+
+  const handleFile = async (f) => {
     if (!f) return;
-    const allowed = ["image/jpeg", "image/png"];
-    if (!allowed.includes(f.type)) {
-      alert("JPG 또는 PNG 파일만 업로드 가능합니다.");
+    const kind = getFileKind(f);
+    if (!kind) {
+      alert("JPG, PNG, XLSX, XLS 파일만 업로드할 수 있습니다.");
       return;
     }
-    if (f.size > 10 * 1024 * 1024) {
+    if (f.size > MAX_BYTES) {
       alert("파일 크기는 최대 10MB까지 가능합니다.");
       return;
     }
+
     setFile(f);
-    const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target.result);
-    reader.readAsDataURL(f);
+    setFileKind(kind);
+    setPreview(null);
+    resetExcelState();
+
+    if (kind === "image") {
+      const reader = new FileReader();
+      reader.onload = (e) => setPreview(e.target.result);
+      reader.readAsDataURL(f);
+      return;
+    }
+
+    setExcelLoading(true);
+    try {
+      const { headers, dataRows, colIndexByHeader } = await parseExcelFile(f);
+      if (!headers.length) {
+        throw new Error("엑셀에서 헤더 행을 찾을 수 없습니다.");
+      }
+      setExcelHeaders(headers);
+      setExcelDataRows(dataRows);
+      setExcelColIndex(colIndexByHeader);
+      setExcelMapping(guessColumnMapping(headers));
+    } catch (err) {
+      alert(err.message || "엑셀 파일을 읽지 못했습니다.");
+      setFile(null);
+      setFileKind(null);
+      resetExcelState();
+    } finally {
+      setExcelLoading(false);
+    }
   };
 
   const onDrop = (e) => {
@@ -33,7 +111,7 @@ export function OcrImageUpload({ t, onScanComplete }) {
   };
 
   const startScan = async () => {
-    if (!file) {
+    if (!file || fileKind !== "image") {
       alert("이미지를 먼저 업로드해주세요.");
       return;
     }
@@ -50,6 +128,12 @@ export function OcrImageUpload({ t, onScanComplete }) {
     try {
       const formData = new FormData();
       formData.append("image", file);
+      if (guildId !== "" && guildId != null) {
+        formData.append("guild_id", String(guildId));
+      }
+      if (contentName) {
+        formData.append("content_name", contentName);
+      }
 
       const res = await fetch("/api/ocr/scan", { method: "POST", body: formData });
       const data = await res.json().catch(() => ({}));
@@ -75,6 +159,8 @@ export function OcrImageUpload({ t, onScanComplete }) {
           avgConf: data.avgConf,
           processingMs: data.processingMs,
           rawText: data.rawText,
+          guildId: data.guildId ?? (guildId !== "" ? Number(guildId) : null),
+          contentName: data.contentName ?? contentName ?? null,
         });
       }, 400);
     } catch (err) {
@@ -87,9 +173,62 @@ export function OcrImageUpload({ t, onScanComplete }) {
 
   const removeFile = () => {
     setFile(null);
+    setFileKind(null);
     setPreview(null);
     setScanProgress(0);
     setScanning(false);
+    resetExcelState();
+  };
+
+  const excelMappingValid = useMemo(() => {
+    if (fileKind !== "excel") return false;
+    return (
+      excelMapping.nick &&
+      excelMapping.nick !== SKIP_VALUE &&
+      excelMapping.weekly &&
+      excelMapping.weekly !== SKIP_VALUE &&
+      !excelLoading
+    );
+  }, [fileKind, excelMapping, excelLoading]);
+
+  const importExcel = async () => {
+    if (!file || fileKind !== "excel") {
+      alert("엑셀 파일을 먼저 업로드해 주세요.");
+      return;
+    }
+    if (!excelMappingValid) {
+      alert("닉네임과 점수 컬럼을 반드시 선택해 주세요.");
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const rows = excelRowsToOcrFormat(
+        excelDataRows,
+        excelMapping,
+        excelColIndex
+      );
+      const avgConf = Math.round(
+        rows.reduce((s, r) => s + (r.conf || 0), 0) / rows.length
+      );
+
+      onScanComplete({
+        fileName: file.name,
+        completedAt: new Date().toLocaleString("ko-KR"),
+        rows,
+        preview: null,
+        avgConf,
+        processingMs: 0,
+        rawText: "",
+        guildId: guildId !== "" ? Number(guildId) : null,
+        contentName: contentName ?? null,
+        sourceType: "excel",
+      });
+    } catch (err) {
+      alert(err.message || "엑셀 데이터를 가져오지 못했습니다.");
+    } finally {
+      setImporting(false);
+    }
   };
 
   const formatSize = (bytes) => {
@@ -102,15 +241,85 @@ export function OcrImageUpload({ t, onScanComplete }) {
     <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18 }}>
       {/* 페이지 헤더 */}
       <div>
-        <div style={{ fontSize: 16, fontWeight: 500, color: t.text, marginBottom: 4 }}>OCR 이미지 업로드</div>
-        <div style={{ fontSize: 11, color: t.textMuted }}>길드 점수 스크린샷을 업로드하면 AI가 자동으로 점수를 인식합니다</div>
+        <div style={{ fontSize: 16, fontWeight: 500, color: t.text, marginBottom: 4 }}>점수 데이터 업로드</div>
+        <div style={{ fontSize: 11, color: t.textMuted }}>
+          스크린샷(OCR) 또는 엑셀 파일로 길드 점수를 가져올 수 있습니다
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
         {/* ── 좌측: 업로드 존 ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* 사전 선택: 길드 / 컨텐츠 */}
+          <div
+            style={{
+              background: t.bgCard,
+              border: `1px solid ${t.border}`,
+              borderRadius: 12,
+              padding: "14px 18px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 500, color: t.text }}>
+                저장 대상 선택
+                <span style={{ fontSize: 10, color: t.textMuted, fontWeight: 400, marginLeft: 6 }}>
+                  스캔 전에 미리 정해두면 매칭 정확도가 올라갑니다
+                </span>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 4 }}>길드</div>
+                <select
+                  value={guildId ?? ""}
+                  onChange={(e) =>
+                    setGuildId(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  style={{ ...selectStyle(t), width: "100%", padding: "7px 10px", fontSize: 12 }}
+                >
+                  {guilds.length === 0 && (
+                    <option value="" style={optionStyle(t)}>
+                      길드 없음
+                    </option>
+                  )}
+                  {guilds.map((g) => (
+                    <option key={g.id} value={g.id} style={optionStyle(t)}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 4 }}>컨텐츠</div>
+                <select
+                  value={contentName}
+                  onChange={(e) => setContentName(e.target.value)}
+                  style={{ ...selectStyle(t), width: "100%", padding: "7px 10px", fontSize: 12 }}
+                >
+                  {contents.length === 0 && (
+                    <option value="" style={optionStyle(t)}>
+                      컨텐츠 없음
+                    </option>
+                  )}
+                  {contents.map((c) => (
+                    <option key={c} value={c} style={optionStyle(t)}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div style={{ background: t.bgCard, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 18px" }}>
-            <div style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 12 }}>이미지 업로드</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 12 }}>파일 업로드</div>
 
             {/* 드래그 앤 드롭 존 */}
             <div
@@ -140,7 +349,7 @@ export function OcrImageUpload({ t, onScanComplete }) {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/jpeg,image/png"
+                accept="image/jpeg,image/png,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                 onChange={(e) => handleFile(e.target.files[0])}
                 style={{ display: "none" }}
               />
@@ -167,10 +376,12 @@ export function OcrImageUpload({ t, onScanComplete }) {
                     </svg>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: t.text, marginBottom: 6, textAlign: "center" }}>
-                    이미지를 드래그하거나 클릭하여 업로드
+                    파일을 드래그하거나 클릭하여 업로드
                   </div>
                   <div style={{ fontSize: 11, color: t.textMuted, textAlign: "center", lineHeight: 1.7 }}>
-                    JPG, PNG · 최대 10MB
+                    JPG, PNG · XLSX, XLS
+                    <br />
+                    최대 10MB
                   </div>
                   {dragOver && (
                     <div
@@ -191,8 +402,35 @@ export function OcrImageUpload({ t, onScanComplete }) {
               ) : (
                 <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                   <div style={{ position: "relative", width: "100%", borderRadius: 8, overflow: "hidden", border: `1px solid ${t.border}` }}>
-                    <img src={preview} alt="preview" style={{ width: "100%", maxHeight: 160, objectFit: "contain", background: "#000", display: "block" }} />
-                    {scanning && (
+                    {fileKind === "image" && preview ? (
+                      <img src={preview} alt="preview" style={{ width: "100%", maxHeight: 160, objectFit: "contain", background: "#000", display: "block" }} />
+                    ) : (
+                      <div
+                        style={{
+                          width: "100%",
+                          minHeight: 120,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          background: t.bgAlt,
+                          padding: 20,
+                        }}
+                      >
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={t.up} strokeWidth="1.5">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="8" y1="13" x2="16" y2="13" />
+                          <line x1="8" y1="17" x2="16" y2="17" />
+                        </svg>
+                        <span style={{ fontSize: 11, color: t.textMuted }}>엑셀 파일</span>
+                        {excelLoading && (
+                          <span style={{ fontSize: 10, color: t.accent }}>시트 읽는 중...</span>
+                        )}
+                      </div>
+                    )}
+                    {scanning && fileKind === "image" && (
                       <div
                         style={{
                           position: "absolute",
@@ -256,16 +494,40 @@ export function OcrImageUpload({ t, onScanComplete }) {
                       </div>
                       <div style={{ fontSize: 10, color: t.textMuted }}>{formatSize(file.size)}</div>
                     </div>
-                    <div style={{ fontSize: 10, padding: "2px 8px", background: t.upBg, color: t.up, borderRadius: 20, border: `1px solid ${t.up}44` }}>
-                      준비됨
+                    <div
+                      style={{
+                        fontSize: 10,
+                        padding: "2px 8px",
+                        background: fileKind === "excel" ? t.accentFaint : t.upBg,
+                        color: fileKind === "excel" ? t.accent : t.up,
+                        borderRadius: 20,
+                        border: `1px solid ${fileKind === "excel" ? t.borderStrong : `${t.up}44`}`,
+                      }}
+                    >
+                      {excelLoading ? "읽는 중" : fileKind === "excel" ? "엑셀" : "준비됨"}
                     </div>
                   </div>
                 </div>
               )}
             </div>
 
+            {/* 엑셀 컬럼 매핑 */}
+            {fileKind === "excel" && !excelLoading && excelHeaders.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <ExcelColumnMapping
+                  t={t}
+                  headers={excelHeaders}
+                  mapping={excelMapping}
+                  onMappingChange={(key, value) =>
+                    setExcelMapping((prev) => ({ ...prev, [key]: value }))
+                  }
+                  previewRows={excelDataRows}
+                />
+              </div>
+            )}
+
             {/* 스캔 진행바 */}
-            {scanning && (
+            {scanning && fileKind === "image" && (
               <div style={{ marginTop: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                   <span style={{ fontSize: 11, color: t.accent, fontWeight: 500 }}>
@@ -298,11 +560,18 @@ export function OcrImageUpload({ t, onScanComplete }) {
           {/* 업로드 가이드 */}
           <div style={{ background: t.bgCard, border: `1px solid ${t.border}`, borderRadius: 10, padding: "13px 16px" }}>
             <div style={{ fontSize: 11, fontWeight: 500, color: t.text, marginBottom: 8 }}>인식 정확도를 높이는 팁</div>
-            {[
-              ["화면 전체", "길드 점수 목록이 전체 보이도록 캡처하세요"],
-              ["고해상도", "해상도가 높을수록 인식률이 높아집니다"],
-              ["텍스트 선명", "흐릿하거나 잘린 텍스트는 인식 오류가 발생할 수 있습니다"],
-            ].map(([t1, t2]) => (
+            {(fileKind === "excel"
+              ? [
+                  ["첫 행 헤더", "첫 줄에 순위·닉네임·점수 등 열 이름이 있으면 자동 매핑됩니다"],
+                  ["필수 컬럼", "닉네임과 점수 열은 반드시 매핑해 주세요"],
+                  ["형식 자유", "컬럼 순서·이름이 달라도 매핑 화면에서 연결하면 됩니다"],
+                ]
+              : [
+                  ["화면 전체", "길드 점수 목록이 전체 보이도록 캡처하세요"],
+                  ["고해상도", "해상도가 높을수록 인식률이 높아집니다"],
+                  ["텍스트 선명", "흐릿하거나 잘린 텍스트는 인식 오류가 발생할 수 있습니다"],
+                ]
+            ).map(([t1, t2]) => (
               <div key={t1} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "flex-start" }}>
                 <span style={{ color: t.up, fontSize: 12, flexShrink: 0, marginTop: 1 }}>✓</span>
                 <div>
@@ -313,43 +582,81 @@ export function OcrImageUpload({ t, onScanComplete }) {
             ))}
           </div>
 
-          {/* 스캔 시작 버튼 */}
-          <button
-            onClick={startScan}
-            disabled={!file || scanning}
-            style={{
-              width: "100%",
-              padding: "13px",
-              border: `1px solid ${file && !scanning ? t.borderStrong : t.border}`,
-              borderRadius: 10,
-              background: file && !scanning ? t.accentFaint : t.bgAlt,
-              color: file && !scanning ? t.accent : t.textMuted,
-              fontSize: 14,
-              fontWeight: 500,
-              fontFamily: "'Courier New',monospace",
-              cursor: file && !scanning ? "pointer" : "not-allowed",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              transition: "all 0.2s",
-              letterSpacing: "0.08em",
-            }}
-          >
-            {scanning ? (
-              <>
-                <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span> 스캔 중...
-              </>
-            ) : (
-              <>
-                <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke={file ? t.accent : t.textMuted} strokeWidth="1.8" strokeLinecap="round">
-                  <path d="M3 7V4a1 1 0 0 1 1-1h3M13 3h3a1 1 0 0 1 1 1v3M17 13v3a1 1 0 0 1-1 1h-3M7 17H4a1 1 0 0 1-1-1v-3" />
-                  <rect x="7" y="7" width="6" height="6" rx="1" />
-                </svg>
-                스캔 시작
-              </>
-            )}
-          </button>
+          {/* OCR 스캔 / 엑셀 가져오기 */}
+          {fileKind === "excel" ? (
+            <button
+              onClick={importExcel}
+              disabled={!file || !excelMappingValid || importing || excelLoading}
+              style={{
+                width: "100%",
+                padding: "13px",
+                border: `1px solid ${excelMappingValid && !importing ? t.borderStrong : t.border}`,
+                borderRadius: 10,
+                background: excelMappingValid && !importing ? t.accentFaint : t.bgAlt,
+                color: excelMappingValid && !importing ? t.accent : t.textMuted,
+                fontSize: 14,
+                fontWeight: 500,
+                fontFamily: "'Courier New',monospace",
+                cursor: excelMappingValid && !importing ? "pointer" : "not-allowed",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                letterSpacing: "0.08em",
+              }}
+            >
+              {importing ? (
+                <>
+                  <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>
+                  가져오는 중...
+                </>
+              ) : (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke={excelMappingValid ? t.accent : t.textMuted} strokeWidth="1.8">
+                    <path d="M10 3v10M6 9l4 4 4-4M4 17h12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  데이터 가져오기
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={startScan}
+              disabled={!file || fileKind !== "image" || scanning}
+              style={{
+                width: "100%",
+                padding: "13px",
+                border: `1px solid ${file && fileKind === "image" && !scanning ? t.borderStrong : t.border}`,
+                borderRadius: 10,
+                background: file && fileKind === "image" && !scanning ? t.accentFaint : t.bgAlt,
+                color: file && fileKind === "image" && !scanning ? t.accent : t.textMuted,
+                fontSize: 14,
+                fontWeight: 500,
+                fontFamily: "'Courier New',monospace",
+                cursor: file && fileKind === "image" && !scanning ? "pointer" : "not-allowed",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                letterSpacing: "0.08em",
+              }}
+            >
+              {scanning ? (
+                <>
+                  <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>
+                  스캔 중...
+                </>
+              ) : (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke={file ? t.accent : t.textMuted} strokeWidth="1.8" strokeLinecap="round">
+                    <path d="M3 7V4a1 1 0 0 1 1-1h3M13 3h3a1 1 0 0 1 1 1v3M17 13v3a1 1 0 0 1-1 1h-3M7 17H4a1 1 0 0 1-1-1v-3" />
+                    <rect x="7" y="7" width="6" height="6" rx="1" />
+                  </svg>
+                  OCR 스캔
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* ── 우측: 결과 미리보기 (대기 상태) ── */}
@@ -415,9 +722,15 @@ export function OcrImageUpload({ t, onScanComplete }) {
                   인식된 이미지 내용이 여기에 표시됩니다
                 </div>
                 <div style={{ fontSize: 11, color: t.textMuted, opacity: 0.6, lineHeight: 1.6 }}>
-                  좌측에서 이미지를 업로드하고
-                  <br />
-                  스캔 시작 버튼을 눌러주세요
+                  {fileKind === "excel" ? (
+                    "컬럼 매핑 후 데이터 가져오기를 눌러주세요"
+                  ) : (
+                    <>
+                      이미지 또는 엑셀을 업로드한 뒤
+                      <br />
+                      OCR 스캔 또는 데이터 가져오기를 실행하세요
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -434,7 +747,30 @@ export function OcrImageUpload({ t, onScanComplete }) {
             </div>
 
             {/* 스캔 중 오버레이 */}
-            {scanning && (
+            {fileKind === "excel" && excelDataRows.length > 0 && !excelLoading && (
+              <div
+                style={{
+                  position: "relative",
+                  zIndex: 1,
+                  marginTop: 16,
+                  padding: "12px 16px",
+                  background: t.bgAlt,
+                  borderRadius: 8,
+                  border: `1px solid ${t.border}`,
+                  width: "100%",
+                  maxWidth: 280,
+                }}
+              >
+                <div style={{ fontSize: 11, color: t.text, marginBottom: 4 }}>
+                  시트 데이터 <strong style={{ color: t.accent }}>{excelDataRows.length}행</strong>
+                </div>
+                <div style={{ fontSize: 10, color: t.textMuted }}>
+                  헤더 {excelHeaders.length}열 · 매핑 후 결과 화면에서 검증·저장
+                </div>
+              </div>
+            )}
+
+            {scanning && fileKind === "image" && (
               <div
                 style={{
                   position: "absolute",

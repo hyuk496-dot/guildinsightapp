@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { TR } from "@/lib/theme";
 import { CONTENTS_INIT } from "@/lib/mock-data";
-import { guildForUi } from "@/lib/guild-display";
+import { guildForUi, resolveGuildMemberCount } from "@/lib/guild-display";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
 import { ContribScatterChart } from "@/components/dashboard/ContribScatterChart";
 import { GuildRadarChart } from "@/components/dashboard/GuildRadarChart";
@@ -18,14 +18,22 @@ export function Dashboard({ t, guild }) {
   const [chartContent, setChartContent] = useState("총력전");
   const [chartData, setChartData] = useState(null);
   const [chartLoading, setChartLoading] = useState(false);
-  const g = guildForUi(guild);
+  const memberCount = resolveGuildMemberCount(
+    guild,
+    membersData,
+    chartData?.totalMembers,
+    { excludeWithdrawn: true }
+  );
+  const g = guildForUi(guild, membersData, chartData?.totalMembers);
 
   const totals = chartData?.totals ?? [0, 0, 0, 0, 0, 0];
   const weekLabels = chartData?.series?.map((s) => s.label) ?? [];
   const latestScore = chartData?.latest ?? 0;
   const scoreDelta = chartData?.delta ?? 0;
   const scoreDeltaPct = chartData?.deltaPct ?? "0";
+  const activeMembers = chartData?.activeMembers ?? 0;
   const activityRate = chartData?.activityRate ?? 0;
+  const activityWeek = chartData?.activityWeek ?? chartData?.rankingWeekMonday;
   const prevActivity = Math.max(0, activityRate - 3);
 
   useEffect(() => {
@@ -50,25 +58,35 @@ export function Dashboard({ t, guild }) {
 
   const mets = g
     ? [
-        { label: "GUILD MEMBERS", val: `${g.members}`, delta: "DB 연동", up: true },
         {
-          label: `WEEKLY SCORE (${chartContent})`,
+          label: "GUILD MEMBERS",
+          val: `${memberCount}`,
+          delta: "(탈퇴 멤버 제외)",
+          up: memberCount > 0,
+        },
+        {
+          label: `${chartContent} 점수`,
           val: latestScore.toLocaleString(),
-          delta: `${scoreDelta >= 0 ? "▲" : "▼"} ${Math.abs(scoreDelta)} (${scoreDeltaPct}%)`,
+          delta: activityWeek
+            ? `${activityWeek} 주차 · ${scoreDelta >= 0 ? "▲" : "▼"} ${Math.abs(scoreDelta)} (${scoreDeltaPct}%)`
+            : `${scoreDelta >= 0 ? "▲" : "▼"} ${Math.abs(scoreDelta)} (${scoreDeltaPct}%)`,
           up: scoreDelta >= 0,
         },
         {
-          label: "SERVER RANK",
+          label: `${chartContent} 랭킹`,
           val: chartData?.currentServerRank ? `#${chartData.currentServerRank}` : `#${g.rank}`,
           delta: chartData?.rankingWeekMonday
-            ? `${chartContent} · ${chartData.rankingWeekMonday} 주차`
+            ? `${chartData.rankingWeekMonday} 주차 기준`
             : "DB 랭킹",
           up: true,
         },
         {
-          label: "ACTIVITY RATE",
+          label: `${chartContent} 참여율`,
           val: `${activityRate}%`,
-          delta: activityRate >= prevActivity ? `▲ 참여 ${chartData?.activeMembers ?? 0}명` : "▼ 감소",
+          delta:
+            activityWeek
+              ? `${activityWeek} 주 · 참여 ${activeMembers}/${memberCount}명`
+              : `참여 ${activeMembers}/${memberCount}명`,
           up: activityRate >= prevActivity,
         },
       ]
@@ -176,9 +194,11 @@ export function Dashboard({ t, guild }) {
       >
         <div style={{ fontSize: 12, fontWeight: 500, color: t.accent, marginBottom: 6 }}>✦ GPT 주간 리포트</div>
         <div style={{ fontSize: 12, color: t.rptText, lineHeight: 1.7 }}>
-          이번 주 길드 <strong style={{ color: t.accent }}>{g.name}</strong> — {chartContent} 주간 합계{" "}
+          길드 <strong style={{ color: t.accent }}>{g.name}</strong> — {chartContent}{" "}
+          {activityWeek ? `(${activityWeek} 주)` : ""} 합계{" "}
           <strong style={{ color: t.accent }}>{latestScore.toLocaleString()}</strong>점 (전주 대비 {scoreDeltaPct}%).
-          참여율 <strong style={{ color: t.accent }}>{activityRate}%</strong>.
+          {chartContent} 참여율 <strong style={{ color: t.accent }}>{activityRate}%</strong>
+          ({activeMembers}/{memberCount}명).
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 12, marginBottom: 14 }}>

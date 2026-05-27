@@ -9,6 +9,7 @@ import {
   groupMembersByGuildId,
   removeGuildFromMembers,
 } from "@/lib/members-utils";
+import { filterActiveMembers } from "@/lib/member-status";
 import { formatScoresFromApi } from "@/lib/radar-utils";
 
 const GuildInsightContext = createContext(null);
@@ -137,13 +138,23 @@ export function GuildInsightProvider({
       const response = await fetch("/api/guilds");
       if (!response.ok) throw new Error("길드 조회 실패");
       const data = await response.json();
-      setGuilds(data);
+      const normalized = (data || []).map((g) => ({
+        ...g,
+        game: g.game_name || g.game || "미지정 게임",
+      }));
+      setGuilds(normalized);
 
       setActiveGuild((prev) => {
-        if (prev && data.some((g) => g.id === prev.id)) return prev;
-        return pickInitialActive(data);
+        if (!prev) return pickInitialActive(normalized);
+        const fresh = normalized.find(
+          (g) => Number(g.id) === Number(prev.id)
+        );
+        if (fresh) {
+          return { ...prev, ...fresh, game: fresh.game_name || fresh.game };
+        }
+        return pickInitialActive(normalized);
       });
-      return data;
+      return normalized;
     } catch (error) {
       console.error("길드 데이터 로드 실패:", error);
       return [];
@@ -208,10 +219,33 @@ export function GuildInsightProvider({
 
   useEffect(() => {
     const init = async () => {
-      await Promise.all([refreshMembers(), refreshScores(), refreshContribs()]);
+      await Promise.all([
+        refreshGuilds(),
+        refreshMembers(),
+        refreshScores(),
+        refreshContribs(),
+      ]);
     };
     init();
-  }, [refreshMembers, refreshScores, refreshContribs]);
+  }, [refreshGuilds, refreshMembers, refreshScores, refreshContribs]);
+
+  // 멤버 목록 로드 후 activeGuild / guilds 의 member_count 동기화
+  useEffect(() => {
+    if (!guilds.length) return;
+    setGuilds((prev) =>
+      prev.map((g) => {
+        const list = membersData[String(g.id)] ?? membersData[g.id];
+        if (!Array.isArray(list)) return g;
+        return { ...g, member_count: filterActiveMembers(list).length };
+      })
+    );
+    setActiveGuild((prev) => {
+      if (!prev?.id) return prev;
+      const list = membersData[String(prev.id)] ?? membersData[prev.id];
+      if (!Array.isArray(list)) return prev;
+      return { ...prev, member_count: filterActiveMembers(list).length };
+    });
+  }, [membersData]); // eslint-disable-line react-hooks/exhaustive-deps -- guilds는 의도적으로 제외(루프 방지)
 
   const addGuild = useCallback(async (name, game) => {
     const response = await fetch("/api/guilds", {
@@ -238,6 +272,9 @@ export function GuildInsightProvider({
         avgConf: meta?.avgConf ?? 0,
         processingMs: meta?.processingMs ?? 0,
         rawText: meta?.rawText || "",
+        guildId: meta?.guildId ?? null,
+        contentName: meta?.contentName ?? null,
+        sourceType: meta?.sourceType || "ocr",
       });
       router.push(ROUTES.ocr);
     },

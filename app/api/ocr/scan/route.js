@@ -45,12 +45,27 @@ export async function POST(request) {
       );
     }
 
+    // 사용자가 업로드 화면에서 미리 선택한 길드/컨텐츠 (선택 사항)
+    const guildIdRaw = formData.get("guild_id");
+    const contentName = (formData.get("content_name") || "").toString().trim() || null;
+    const guildId =
+      guildIdRaw != null && guildIdRaw !== "" && !Number.isNaN(Number(guildIdRaw))
+        ? Number(guildIdRaw)
+        : null;
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const { fullText, textAnnotations } = await runVisionOcr(buffer);
 
-    let rows = parseVisionAnnotations(textAnnotations);
+    // 콘텐츠별 파서 옵션 (공성전: 2단 분할 + rank+score 필수 strict 모드)
+    const parserOptions = {
+      contentName: contentName || null,
+      knownGuilds: undefined, // 추후 DB 에서 주입 가능
+      debug: true,
+    };
+
+    let rows = parseVisionAnnotations(textAnnotations, parserOptions);
     if (rows.length === 0 && fullText) {
-      rows = parseOcrPlainText(fullText);
+      rows = parseOcrPlainText(fullText, parserOptions);
     }
 
     rows = rows.map((r, i) => ({
@@ -67,6 +82,8 @@ export async function POST(request) {
       avgConf: summary.avgConf,
       warnCount: summary.warnCount,
       processingMs: Date.now() - started,
+      guildId,
+      contentName,
     });
   } catch (error) {
     console.error("OCR 스캔 에러:", error);

@@ -24,12 +24,18 @@ export async function GET() {
     if (error) throw error;
     if (!guilds) return NextResponse.json([], { status: 200 });
 
-    const { data: members } = await supabase.from('members').select('guild_id');
+    const { data: members } = await supabase.from('members').select('guild_id, left_at');
 
     const result = guilds.map(g => ({
       ...g,
       game: g.game_name || "미지정 게임",
-      member_count: members ? members.filter(m => Number(m.guild_id) === Number(g.id)).length : 0,
+      member_count: members
+        ? members.filter(
+            (m) =>
+              Number(m.guild_id) === Number(g.id) &&
+              (m.left_at == null || String(m.left_at).trim() === "")
+          ).length
+        : 0,
     }));
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
@@ -69,6 +75,18 @@ export async function POST(request) {
   }
 }
 
+async function countMembersForGuild(supabase, guildId) {
+  const { data: members } = await supabase
+    .from("members")
+    .select("guild_id, left_at");
+  if (!members) return 0;
+  return members.filter(
+    (m) =>
+      Number(m.guild_id) === Number(guildId) &&
+      (m.left_at == null || String(m.left_at).trim() === "")
+  ).length;
+}
+
 export async function PUT(request) {
   const { supabase, deny } = await requireUser();
   if (deny) return deny;
@@ -82,12 +100,13 @@ export async function PUT(request) {
       .select()
       .single();
     if (error) throw error;
+    const member_count = await countMembersForGuild(supabase, data.id);
     return NextResponse.json({
       id: data.id,
       name: data.name,
       game: data.game_name || "미지정 게임",
       game_name: data.game_name,
-      member_count: 0,
+      member_count,
     }, { status: 200 });
   } catch (error) {
     console.error("guilds PUT 에러:", error);

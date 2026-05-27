@@ -19,8 +19,12 @@ export function OcrUpload({
 }) {
   const [rows, setRows] = useState([]);
   const [checked, setChecked] = useState({});
-  const [saveContent, setSaveContent] = useState(contents[0] || "총력전");
-  const [saveGuildId, setSaveGuildId] = useState(defaultGuildId ?? guilds[0]?.id);
+  const [saveContent, setSaveContent] = useState(
+    ocrSession?.contentName || contents[0] || "총력전"
+  );
+  const [saveGuildId, setSaveGuildId] = useState(
+    ocrSession?.guildId ?? defaultGuildId ?? guilds[0]?.id
+  );
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filterWarn, setFilterWarn] = useState(false);
@@ -34,8 +38,16 @@ export function OcrUpload({
     membersData[saveGuildId] || membersData[String(saveGuildId)] || [];
 
   useEffect(() => {
-    if (defaultGuildId != null) setSaveGuildId(defaultGuildId);
-  }, [defaultGuildId]);
+    // 새 OCR 세션이 들어오면 사전 선택한 길드/컨텐츠로 자동 정렬
+    if (ocrSession?.guildId != null) {
+      setSaveGuildId(ocrSession.guildId);
+    } else if (defaultGuildId != null) {
+      setSaveGuildId(defaultGuildId);
+    }
+    if (ocrSession?.contentName) {
+      setSaveContent(ocrSession.contentName);
+    }
+  }, [ocrSession?.guildId, ocrSession?.contentName, defaultGuildId]);
 
   useEffect(() => {
     if (!ocrSession?.rows?.length) {
@@ -58,6 +70,10 @@ export function OcrUpload({
     () => rows.filter((r) => r.memberId != null && r.matchKind === "fuzzy").length,
     [rows]
   );
+  const savedCount = useMemo(
+    () => rows.filter((r) => r.status === "saved").length,
+    [rows]
+  );
   const avgConf = ocrSession?.avgConf ?? summary.avgConf;
   const checkedIds = Object.keys(checked).filter((k) => checked[k]);
   const allChecked = rows.length > 0 && checkedIds.length === rows.length;
@@ -70,19 +86,38 @@ export function OcrUpload({
 
   const toggleOne = (id, v) => setChecked((p) => ({ ...p, [String(id)]: v }));
 
+  const clearSavedStatus = (row) => {
+    if (row.status !== "saved") return row;
+    const { status: _s, ...rest } = row;
+    return rest;
+  };
+
   const editRow = (id, val) => {
-    const num = parseInt(val, 10);
-    if (isNaN(num)) return;
-    setRows((p) => p.map((r) => (String(r.id) === String(id) ? { ...r, weekly: num } : r)));
+    // val 은 number 또는 string. string 일 경우 콤마/알파벳/공백 제거 후 정수로.
+    const cleaned =
+      typeof val === "number"
+        ? String(val)
+        : String(val || "").replace(/[^\d]/g, "");
+    if (cleaned === "") return;
+    const num = parseInt(cleaned, 10);
+    if (Number.isNaN(num) || num < 0) return;
+    setRows((p) =>
+      p.map((r) => {
+        if (String(r.id) !== String(id)) return r;
+        const next = clearSavedStatus(r);
+        return { ...next, weekly: num, warn: false };
+      })
+    );
   };
 
   const handlePickMember = (rowId, memberIdRaw) => {
     setRows((prev) =>
       prev.map((r) => {
         if (String(r.id) !== String(rowId)) return r;
+        const base = clearSavedStatus(r);
         if (!memberIdRaw) {
           return {
-            ...r,
+            ...base,
             memberId: null,
             matchedNick: null,
             matchKind: "none",
@@ -91,9 +126,9 @@ export function OcrUpload({
           };
         }
         const member = members.find((m) => String(m.id) === String(memberIdRaw));
-        if (!member) return r;
+        if (!member) return base;
         return {
-          ...r,
+          ...base,
           memberId: Number(member.id),
           matchedNick: member.nick,
           matchKind: "exact",
@@ -127,19 +162,26 @@ export function OcrUpload({
     setSaving(true);
     let ok = 0;
     const failed = [];
+    const savedRowIds = [];
 
     try {
       for (const r of toSave) {
         const targetMember = members.find(
           (m) => Number(m.id) === Number(r.memberId)
         );
+        // 저장 닉네임 우선순위:
+        //  1) DB 의 정확한 길드원 닉네임 (드롭다운에서 매칭된 멤버)
+        //  2) 자동 매칭으로 잡힌 matchedNick
+        //  3) 마지막 폴백 — OCR 원문 닉네임
+        const finalNick = targetMember?.nick || r.matchedNick || r.nick;
+
         const res = await fetch("/api/scores", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             member_id: Number(r.memberId),
             guild_id: Number(saveGuildId),
-            nick: r.nick,
+            nick: finalNick,
             job: targetMember?.job || r.job || "—",
             content_name: saveContent,
             score: Number(r.weekly),
@@ -147,15 +189,35 @@ export function OcrUpload({
             created_at: weekMondayUtcIso(),
           }),
         });
-        if (res.ok) ok += 1;
-        else failed.push(r.nick);
+        if (res.ok) {
+          ok += 1;
+          savedRowIds.push(String(r.id));
+        } else {
+          failed.push(finalNick);
+        }
+      }
+
+      if (savedRowIds.length > 0) {
+        setRows((prev) =>
+          prev.map((r) =>
+            savedRowIds.includes(String(r.id))
+              ? { ...r, status: "saved", warn: false }
+              : r
+          )
+        );
+        setChecked((prev) => {
+          const next = { ...prev };
+          savedRowIds.forEach((id) => {
+            delete next[id];
+          });
+          return next;
+        });
       }
 
       if (ok > 0) {
         await refreshScores?.();
         await refreshContribs?.();
         setSaved(true);
-        setChecked({});
         setTimeout(() => setSaved(false), 2500);
       }
 
@@ -175,9 +237,9 @@ export function OcrUpload({
   if (!ocrSession?.rows?.length) {
     return (
       <div style={{ flex: 1, padding: "24px 28px", color: t.textMuted, fontSize: 13 }}>
-        <p style={{ marginBottom: 12 }}>OCR 스캔 결과가 없습니다.</p>
+        <p style={{ marginBottom: 12 }}>인식·가져오기 결과가 없습니다.</p>
         <Link href={ROUTES.ocrUpload} style={{ color: t.accent, fontSize: 12 }}>
-          이미지 업로드 →
+          파일 업로드 →
         </Link>
       </div>
     );
@@ -198,7 +260,9 @@ export function OcrUpload({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: t.text }}>OCR 인식 결과</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: t.text }}>
+            {ocrSession?.sourceType === "excel" ? "엑셀 가져오기 결과" : "OCR 인식 결과"}
+          </div>
           <div style={{ fontSize: 10, color: t.textMuted }}>{metaLabel}</div>
         </div>
         <div style={{ flex: 1 }} />
@@ -299,7 +363,7 @@ export function OcrUpload({
           </div>
         )}
 
-        {(unmatchedCount > 0 || fuzzyCount > 0) && (
+        {(unmatchedCount > 0 || fuzzyCount > 0 || members.length === 0) && (
           <div
             style={{
               display: "flex",
@@ -313,7 +377,14 @@ export function OcrUpload({
               flexWrap: "wrap",
             }}
           >
-            <div style={{ fontSize: 12, color: "#8a5200" }}>
+            <div style={{ fontSize: 12, color: "#8a5200", lineHeight: 1.6 }}>
+              {members.length === 0 && (
+                <div style={{ marginBottom: unmatchedCount > 0 ? 6 : 0 }}>
+                  현재 저장 길드에 등록된 길드원이 없습니다. 사이드바{" "}
+                  <strong>[길드원 관리]</strong>에서 길드원을 먼저 등록하면 닉네임 옆
+                  드롭다운으로 매칭할 수 있습니다.
+                </div>
+              )}
               {unmatchedCount > 0 && (
                 <>
                   매칭 안 된 닉네임 <strong>{unmatchedCount}개</strong>
@@ -325,7 +396,9 @@ export function OcrUpload({
                   유사 매칭 <strong>{fuzzyCount}개</strong>
                 </>
               )}
-              {" — 닉네임 셀에서 길드원을 직접 선택하거나 매칭을 변경하세요."}
+              {unmatchedCount > 0 &&
+                members.length > 0 &&
+                " — 닉네임 셀에서 길드원을 직접 선택하거나 매칭을 변경하세요."}
             </div>
           </div>
         )}
@@ -362,16 +435,23 @@ export function OcrUpload({
 
           <div style={{ background: t.bgCard, border: `1px solid ${t.border}`, borderRadius: 11, padding: "14px 16px" }}>
             <div style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 12 }}>인식 요약</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
               {[
                 { label: "인식된 항목", value: `${rows.length}명`, alert: false },
                 { label: "평균 신뢰도", value: `${avgConf}%`, alert: false },
+                { label: "저장 완료", value: `${savedCount}명`, alert: false, highlight: savedCount > 0 },
                 { label: "매칭 필요", value: `${unmatchedCount}개`, alert: unmatchedCount > 0 },
                 { label: "유사 매칭", value: `${fuzzyCount}개`, alert: fuzzyCount > 0 },
               ].map((it) => (
                 <div key={it.label} style={{ background: t.bgAlt, borderRadius: 7, padding: "9px 10px" }}>
                   <div style={{ fontSize: 9, color: t.textMuted, marginBottom: 3 }}>{it.label}</div>
-                  <div style={{ fontSize: 16, fontWeight: 500, color: it.alert ? "#d4a017" : t.text }}>
+                  <div
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 500,
+                      color: it.alert ? "#d4a017" : it.highlight ? "#34d399" : t.text,
+                    }}
+                  >
                     {it.value}
                   </div>
                 </div>
@@ -401,7 +481,7 @@ export function OcrUpload({
             <div>
               <div style={{ fontSize: 12, fontWeight: 500, color: t.text }}>인식 데이터 검토 및 수정</div>
               <div style={{ fontSize: 10, color: t.textMuted, marginTop: 2 }}>
-                더블클릭으로 점수 수정 · 저장 시 Supabase scores 테이블에 반영
+                점수 칸 더블클릭으로 수정 · 매칭 안 된 닉네임은 길드원 선택으로 정합 후 저장
               </div>
             </div>
             <button
@@ -427,7 +507,7 @@ export function OcrUpload({
                   <th style={{ padding: "7px 10px", textAlign: "left" }}>
                     <input type="checkbox" checked={allChecked} onChange={toggleAll} style={{ cursor: "pointer" }} />
                   </th>
-                  {["#", "닉네임", "직업", "주간 점수", "누적 점수", "등급", "신뢰도", "상태"].map((h) => (
+                  {["순위", "닉네임", "소속길드", "점수", "신뢰도", "상태"].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -476,7 +556,30 @@ export function OcrUpload({
             flexWrap: "wrap",
           }}
         >
-          <div style={{ fontSize: 11, color: t.textMuted }}>{checkedIds.length}개 선택됨</div>
+          <div style={{ fontSize: 11, color: t.textMuted }}>
+            {checkedIds.length}개 선택됨
+            {savedCount > 0 && (
+              <span style={{ marginLeft: 8, color: "#34d399" }}>
+                · 저장함 {savedCount}명
+              </span>
+            )}
+          </div>
+          {(ocrSession?.guildId != null || ocrSession?.contentName) && (
+            <span
+              style={{
+                fontSize: 9,
+                padding: "2px 8px",
+                background: t.accentFaint,
+                border: `1px solid ${t.borderStrong}`,
+                color: t.accent,
+                borderRadius: 20,
+                fontFamily: "'Courier New',monospace",
+              }}
+              title="업로드 화면에서 사전 선택한 값이 자동 적용되었습니다"
+            >
+              ✓ 사전 선택 적용됨
+            </span>
+          )}
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 10, color: t.textMuted }}>저장 길드:</span>

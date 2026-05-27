@@ -10,6 +10,13 @@ import { upsertMember, removeMember } from "@/lib/members-utils";
 import { memberForUi } from "@/lib/guild-display";
 import { buildMemberRadar, hasRadarData } from "@/lib/radar-utils";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
+import { hasMemberLeft } from "@/lib/member-status";
+
+const MEMBER_STATUS_FILTERS = [
+  { id: "all", label: "전체 보기" },
+  { id: "active", label: "활동 중인 멤버" },
+  { id: "left", label: "탈퇴한 멤버" },
+];
 
 export function MemberManagement({
   t,
@@ -23,6 +30,7 @@ export function MemberManagement({
   const { refreshGuilds } = useGuildInsight();
 
   const [guildId, setGuildId] = useState(guilds[0]?.id);
+  const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [modal, setModal] = useState(null);
@@ -41,9 +49,19 @@ export function MemberManagement({
     return memberForUi(m, radar);
   };
 
-  const members = currentMembers
+  const statusFiltered = currentMembers.filter((m) => {
+    const left = hasMemberLeft(m);
+    if (statusFilter === "active") return !left;
+    if (statusFilter === "left") return left;
+    return true;
+  });
+
+  const members = statusFiltered
     .map(withRadar)
     .filter((m) => m.nick.toLowerCase().includes(search.toLowerCase()));
+
+  const activeCount = currentMembers.filter((m) => !hasMemberLeft(m)).length;
+  const leftCount = currentMembers.length - activeCount;
   const selMember =
     members.find((m) => m.id === selected?.id) ||
     (selected ? withRadar(selected) : null);
@@ -157,6 +175,41 @@ export function MemberManagement({
               </option>
             ))}
           </select>
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              marginBottom: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            {MEMBER_STATUS_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => {
+                  setStatusFilter(f.id);
+                  setSelected(null);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 10,
+                  padding: "5px 6px",
+                  borderRadius: 6,
+                  border: `1px solid ${statusFilter === f.id ? t.borderStrong : t.border}`,
+                  background: statusFilter === f.id ? t.accentFaint : "transparent",
+                  color: statusFilter === f.id ? t.accent : t.textMuted,
+                  cursor: "pointer",
+                  fontFamily: "'Courier New',monospace",
+                }}
+              >
+                {f.label}
+                {f.id === "active" && activeCount > 0 ? ` (${activeCount})` : ""}
+                {f.id === "left" && leftCount > 0 ? ` (${leftCount})` : ""}
+              </button>
+            ))}
+          </div>
           <div style={{ position: "relative" }}>
             <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: t.textMuted, fontSize: 12, pointerEvents: "none" }}>
               🔍
@@ -171,7 +224,15 @@ export function MemberManagement({
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 10px" }}>
           {members.length === 0 && (
-            <div style={{ textAlign: "center", color: t.textMuted, fontSize: 12, marginTop: 40 }}>결과 없음</div>
+            <div style={{ textAlign: "center", color: t.textMuted, fontSize: 12, marginTop: 40, lineHeight: 1.6 }}>
+              {statusFilter === "left"
+                ? "탈퇴일이 등록된 길드원이 없습니다."
+                : statusFilter === "active"
+                  ? "활동 중인 길드원이 없습니다."
+                  : search.trim()
+                    ? "검색 결과가 없습니다."
+                    : "등록된 길드원이 없습니다."}
+            </div>
           )}
           {members.map((m, i) => (
             <div
@@ -211,6 +272,9 @@ export function MemberManagement({
                 <div style={{ fontSize: 12, fontWeight: 500, color: selected?.id === m.id ? t.accent : t.text }}>{m.nick}</div>
                 <div style={{ fontSize: 10, color: t.textMuted }}>
                   {m.job} · {m.server}
+                  {hasMemberLeft(m) && m.left ? (
+                    <span style={{ color: t.dn, marginLeft: 4 }}>· 탈퇴 {m.left}</span>
+                  ) : null}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 4 }}>

@@ -6,7 +6,7 @@ import { SIM_CONTENTS } from "@/lib/constants";
 import { iStyle, selectStyle, optionStyle, btnPrimary, btnGhost } from "@/lib/styles";
 import { formatWeekDisplay } from "@/lib/week-utils";
 
-export function RankingSimulation({ t, guilds, activeGuild }) {
+export function RankingSimulationLegacy({ t, guilds, activeGuild }) {
   const [guildId, setGuildId] = useState(activeGuild?.id ?? guilds[0]?.id);
   const [content, setContent] = useState(SIM_CONTENTS[0]);
   const [simScores, setSimScores] = useState({});
@@ -98,6 +98,20 @@ export function RankingSimulation({ t, guilds, activeGuild }) {
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px" }}>
+      <div
+        style={{
+          marginBottom: 12,
+          padding: "10px 14px",
+          background: "rgba(239,159,39,0.1)",
+          border: "1px solid rgba(239,159,39,0.35)",
+          borderRadius: 8,
+          fontSize: 11,
+          color: "#8a5200",
+          lineHeight: 1.6,
+        }}
+      >
+        구 버전(수동 타 길드 조정) 화면입니다. 일반 이용은 사이드바 「랭킹 목표」를 사용하세요.
+      </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 500, color: t.text }}>랭킹 시뮬레이션</div>

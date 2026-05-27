@@ -5,6 +5,7 @@ import { getServerSupabase } from "@/lib/supabase-server";
 import { getAdminSupabase } from "@/lib/supabase-admin";
 import { buildGuildWeeklyChart } from "@/lib/dashboard-utils";
 import { buildServerRankings } from "@/lib/server-rank-utils";
+import { computeContentParticipation } from "@/lib/dashboard-activity";
 
 export async function GET(request) {
   const supabase = await getServerSupabase();
@@ -40,7 +41,7 @@ export async function GET(request) {
         .maybeSingle(),
       supabase
         .from("members")
-        .select("id")
+        .select("id, left_at")
         .eq("guild_id", Number(guildId)),
     ]);
 
@@ -95,29 +96,42 @@ export async function GET(request) {
 
     const chart = buildGuildWeeklyChart(myScores || [], guildId, content, 6);
 
-    const memberIds = new Set((myMembers || []).map((m) => String(m.id)));
-    const activeMembers = new Set();
-    (myScores || []).forEach((row) => {
-      const week =
-        row.week_monday?.split?.("T")?.[0] ||
-        row.created_at?.split?.("T")?.[0];
-      const latestWeek = chart.series[chart.series.length - 1]?.weekMonday;
-      if (week === latestWeek && memberIds.has(String(row.member_id))) {
-        activeMembers.add(String(row.member_id));
-      }
-    });
+    const participation = computeContentParticipation(
+      myScores || [],
+      myMembers || [],
+      content
+    );
 
-    const activityRate =
-      memberIds.size > 0
-        ? Math.round((activeMembers.size / memberIds.size) * 100)
-        : 0;
+    // 랭킹 기준 주의 합계(컨텐츠별 주간 점수 카드와 일치)
+    const contentWeekScore = participation.weekScoreTotal;
+    const chartOnActivityWeek = chart.series.find(
+      (s) => s.weekMonday === participation.activityWeek
+    );
+    const latest = contentWeekScore > 0 ? contentWeekScore : chart.latest;
+    const prev =
+      chartOnActivityWeek && chart.series.length >= 2
+        ? (() => {
+            const idx = chart.series.findIndex(
+              (s) => s.weekMonday === participation.activityWeek
+            );
+            return idx > 0 ? chart.series[idx - 1].total : chart.prev;
+          })()
+        : chart.prev;
+    const delta = latest - prev;
+    const deltaPct = prev ? ((delta / prev) * 100).toFixed(1) : "0";
 
     return NextResponse.json({
       content,
       ...chart,
-      activityRate,
-      activeMembers: activeMembers.size,
-      totalMembers: memberIds.size,
+      latest,
+      prev,
+      delta,
+      deltaPct,
+      contentWeekScore,
+      activityWeek: participation.activityWeek,
+      activityRate: participation.activityRate,
+      activeMembers: participation.activeMembers,
+      totalMembers: participation.totalMembers,
       serverRanks: serverRanks.ranks,
       currentServerRank: serverRanks.currentRank,
       rankingWeekMonday: serverRanks.weekMonday,

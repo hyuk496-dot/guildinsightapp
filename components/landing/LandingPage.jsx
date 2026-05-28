@@ -52,6 +52,24 @@ function LandingSessionGate() {
         return;
       }
 
+      // 일부 환경(Supabase URL 설정/allowlist 문제 등)에서 /auth/callback 대신
+      // 루트(/)로 ?code=... 가 붙어 돌아오는 케이스를 복구한다.
+      const code = searchParams.get("code");
+      const err = searchParams.get("error");
+      const errCode = searchParams.get("error_code");
+      const errDesc = searchParams.get("error_description");
+
+      if (code || err || errDesc) {
+        const qs = new URLSearchParams();
+        if (code) qs.set("code", code);
+        if (err) qs.set("error", err);
+        if (errCode) qs.set("error_code", errCode);
+        if (errDesc) qs.set("error_description", errDesc);
+        qs.set("next", "/dashboard");
+        if (!cancelled) router.replace(`/auth/callback?${qs.toString()}`);
+        return;
+      }
+
       const { data: { user }, error } = await supa.auth.getUser();
       if (!cancelled && user?.id && !error) {
         router.replace("/dashboard");
@@ -211,7 +229,7 @@ function LandingPageInner() {
 
   const closeOverlay = () => setOverlayOpen(false);
 
-  const playUnlockAndEnter = () => {
+  const playUnlock = (onDone) => {
     setUnlocking(true);
     let t = 0;
     const arch = archRef.current;
@@ -238,12 +256,18 @@ function LandingPageInner() {
       }
       if (t > 600) {
         clearInterval(anim);
-        try {
-          sessionStorage.setItem("gi.preferredGuildName", "비회원 샘플 길드");
-        } catch {}
-        router.push("/dashboard");
+        if (typeof onDone === "function") onDone();
       }
     }, 16);
+  };
+
+  const playUnlockAndEnter = () => {
+    playUnlock(() => {
+      try {
+        sessionStorage.setItem("gi.preferredGuildName", "비회원 샘플 길드");
+      } catch {}
+      router.push("/dashboard");
+    });
   };
 
   const doLogin = async () => {
@@ -298,12 +322,32 @@ function LandingPageInner() {
       try {
         sessionStorage.setItem("gi.preferredGuildName", "비회원 샘플 길드");
       } catch {}
+
+      // OAuth도 이메일 로그인처럼 "자물쇠 해제" 연출 후 리다이렉트되도록 처리
+      closeOverlay();
+      await new Promise((r) => {
+        playUnlock(() => r());
+      });
+
       const { getBrowserSupabase } = await import("@/lib/supabase-browser");
       const supa = getBrowserSupabase();
+      const siteOrigin =
+        process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+        window.location.origin;
+      const callbackUrl = new URL("/auth/callback", siteOrigin);
+      callbackUrl.searchParams.set("next", "/dashboard");
       const { error } = await supa.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: callbackUrl.toString(),
+          ...(provider === "google"
+            ? {
+                queryParams: {
+                  access_type: "offline",
+                  prompt: "consent",
+                },
+              }
+            : {}),
         },
       });
       if (error) throw error;
@@ -1052,7 +1096,21 @@ function LandingPageInner() {
           .hero { flex-direction: column; }
           .hero-right { width: 100%; display: flex; justify-content: center; }
           .cards-row { grid-template-columns: 1fr; }
-          .nav-links { display: none; }
+          /* 모바일에서도 FEATURES/DEMO/PRICING 노출 */
+          .nav {
+            padding: 12px 14px;
+            gap: 10px;
+          }
+          .nav-links {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            font-size: 11px;
+          }
+          .nav-link {
+            padding: 8px 10px;
+          }
         }
       `}</style>
     </div>

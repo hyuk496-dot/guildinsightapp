@@ -51,6 +51,7 @@ export function OcrImageUpload({
     remaining: 0,
     max: FREE_OCR_MAX,
     unlimited: false,
+    isAdmin: false,
     loading: true,
   });
   const [limitModalOpen, setLimitModalOpen] = useState(false);
@@ -58,12 +59,17 @@ export function OcrImageUpload({
   const fetchOcrQuota = useCallback(async () => {
     try {
       const res = await fetch("/api/ocr/quota");
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // 에러여도 로딩이 멈추지 않도록 처리
+        setOcrQuota((q) => ({ ...q, loading: false }));
+        return;
+      }
       setOcrQuota({
         remaining: data.remaining ?? 0,
         max: data.max ?? FREE_OCR_MAX,
         unlimited: !!data.unlimited,
+        isAdmin: !!data.isAdmin,
         loading: false,
       });
     } catch {
@@ -342,7 +348,11 @@ export function OcrImageUpload({
             <>
               남은 무료 이미지 스캔:{" "}
               <strong style={{ color: imageQuotaBlocked ? "#ff7070" : t.accent }}>
-                {ocrQuota.unlimited ? "무제한" : `${ocrQuota.remaining}회`}
+                {ocrQuota.unlimited
+                  ? ocrQuota.isAdmin
+                    ? "무제한 (Admin)"
+                    : "무제한"
+                  : `${ocrQuota.remaining}회`}
               </strong>{" "}
               / {ocrQuota.max}회
               <span style={{ color: t.textMuted, marginLeft: 4 }}>(엑셀 업로드는 무제한)</span>

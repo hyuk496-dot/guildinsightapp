@@ -6,6 +6,7 @@ import {
   assertAuthenticatedUserId,
   getOcrQuotaForUser,
 } from "@/lib/ocr-quota-server";
+import { ADMIN_EMAIL, FREE_OCR_MAX } from "@/lib/ocr-quota";
 
 export async function GET() {
   const supabase = await getServerSupabase();
@@ -18,6 +19,13 @@ export async function GET() {
   }
 
   try {
+    // admin 프리패스(응답 즉시)
+    if ((user.email || "").trim() === ADMIN_EMAIL) {
+      return NextResponse.json(
+        { remaining: FREE_OCR_MAX, max: FREE_OCR_MAX, unlimited: true, isAdmin: true },
+        { status: 200 }
+      );
+    }
     const quota = await getOcrQuotaForUser(user.id, user.email ?? "");
     return NextResponse.json(quota, { status: 200 });
   } catch (error) {

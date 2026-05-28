@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useToast } from "@/components/shared/Toast";
 
 const PROVIDER_LABEL = {
   google: "Google 계정",
@@ -115,6 +116,18 @@ export function UserProfilePopover({
   isAdminAccount,
 }) {
   const popRef = useRef(null);
+  const { showToast } = useToast();
+  const [webhook, setWebhook] = useState("");
+  const [webhookLoaded, setWebhookLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const isValidWebhook = useMemo(() => {
+    const v = (webhook || "").trim();
+    if (!v) return true; // empty = clear
+    return /^https:\/\/(ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+/i.test(
+      v
+    );
+  }, [webhook]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -135,6 +148,26 @@ export function UserProfilePopover({
     };
   }, [open, onClose, anchorRef]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setWebhookLoaded(false);
+    fetch("/api/profile")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const v = data?.profile?.discord_webhook_url || "";
+        setWebhook(v || "");
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setWebhookLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const provider = user?.provider || "email";
@@ -144,6 +177,32 @@ export function UserProfilePopover({
   const displayName = user?.displayName || user?.email || "게스트";
   const email = user?.email || "";
   const initials = (email || displayName || "?").slice(0, 2).toUpperCase();
+
+  const isAdmin = !!isAdminAccount;
+
+  const saveWebhook = async () => {
+    if (!isValidWebhook) {
+      showToast("Webhook URL 형식이 올바르지 않습니다.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discord_webhook_url: webhook }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "저장에 실패했습니다.");
+      }
+      showToast("Webhook URL이 저장되었습니다.");
+    } catch (e) {
+      showToast(e?.message || "저장에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div
@@ -260,6 +319,85 @@ export function UserProfilePopover({
             <ProviderIcon provider={provider} />
             {providerLabel}
           </div>
+        </div>
+      </div>
+
+      {/* Discord Webhook 설정 */}
+      <div
+        style={{
+          marginTop: 8,
+          padding: "10px 10px",
+          borderRadius: 10,
+          border: `1px solid ${t.borderSubtle || "rgba(255,255,255,0.08)"}`,
+          background: "rgba(0,200,255,0.03)",
+        }}
+      >
+        <div style={{ fontSize: 10, color: t.textMuted, letterSpacing: "0.08em", marginBottom: 6 }}>
+          DISCORD WEBHOOK
+        </div>
+        <input
+          value={webhook}
+          onChange={(e) => setWebhook(e.target.value)}
+          placeholder="https://discord.com/api/webhooks/..."
+          disabled={!webhookLoaded || saving}
+          style={{
+            width: "100%",
+            background: "rgba(0,200,255,0.05)",
+            border: `1px solid ${isValidWebhook ? "rgba(0,200,255,0.18)" : "rgba(255,91,91,0.35)"}`,
+            borderRadius: 8,
+            color: t.text,
+            fontSize: 10,
+            padding: "8px 10px",
+            outline: "none",
+            fontFamily: "monospace",
+          }}
+        />
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() => {
+              saveWebhook();
+            }}
+            disabled={!webhookLoaded || saving}
+            style={{
+              flex: 1,
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: `1px solid ${t.borderStrong || "rgba(0,200,255,0.35)"}`,
+              background: t.accentFaint,
+              color: t.accent,
+              fontSize: 11,
+              cursor: saving ? "wait" : "pointer",
+              fontFamily: "inherit",
+              fontWeight: 600,
+              opacity: !webhookLoaded ? 0.6 : 1,
+            }}
+          >
+            {saving ? "저장 중..." : "저장"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setWebhook("");
+            }}
+            disabled={!webhookLoaded || saving}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: `1px solid ${t.borderSubtle || "rgba(255,255,255,0.12)"}`,
+              background: "transparent",
+              color: t.textSub,
+              fontSize: 11,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              opacity: !webhookLoaded ? 0.6 : 1,
+            }}
+          >
+            비우기
+          </button>
+        </div>
+        <div style={{ marginTop: 6, fontSize: 9, color: t.textMuted, lineHeight: 1.5 }}>
+          Webhook URL은 저장할 수 있습니다. 실제 공유/출력 기능은 PRO 구독 후 사용 가능합니다.
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { ToastProvider, useToast, LOGIN_REQUIRED_TOAST } from "@/components/shared/Toast";
 
@@ -602,8 +603,15 @@ function LandingPageInner() {
               {oauthError && <div className="err-msg">{oauthError}</div>}
 
               <div className="oauth-foot">
-                가입 시 <span className="oauth-link">이용약관</span> 및{" "}
-                <span className="oauth-link">개인정보처리방침</span>에 동의하게 됩니다.
+                가입 시{" "}
+                <Link href="/terms" className="oauth-link" onClick={closeOverlay}>
+                  이용약관
+                </Link>{" "}
+                및{" "}
+                <Link href="/privacy" className="oauth-link" onClick={closeOverlay}>
+                  개인정보처리방침
+                </Link>
+                에 동의하게 됩니다.
               </div>
             </div>
           )}
@@ -1069,13 +1077,17 @@ function LandingPageInner() {
           line-height: 1.6;
           letter-spacing: 0.04em;
         }
-        .oauth-link {
+        /* Next.js Link는 내부 <a>로 렌더 — :global()로 점선·호버 스타일 적용 */
+        .oauth-foot :global(a.oauth-link) {
           color: rgba(0, 200, 255, 0.6);
           cursor: pointer;
           text-decoration: underline dotted;
           text-underline-offset: 2px;
+          transition: color 0.2s;
         }
-        .oauth-link:hover { color: #00c8ff; }
+        .oauth-foot :global(a.oauth-link:hover) {
+          color: #00c8ff;
+        }
 
         .unlock-screen {
           position: fixed;

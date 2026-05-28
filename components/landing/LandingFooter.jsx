@@ -1,5 +1,3 @@
-'use client';
-
 import Link from "next/link";
 
 const linkClass =
@@ -26,10 +24,10 @@ export function LandingFooter() {
           >
             Discord
           </a>
-          <Link href="/billing" className={linkClass}>
+          <Link href="/privacy" className={linkClass}>
             Privacy Policy
           </Link>
-          <Link href="/billing" className={linkClass}>
+          <Link href="/terms" className={linkClass}>
             Terms of Service
           </Link>
         </div>

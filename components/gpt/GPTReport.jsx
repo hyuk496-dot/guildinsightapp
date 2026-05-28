@@ -1,11 +1,17 @@
 'use client';
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Tag } from "@/components/shared/Tag";
 import { selectStyle, optionStyle } from "@/lib/styles";
 import { CONTENTS_INIT } from "@/lib/mock-data";
+import { exportElementToPdf } from "@/lib/export-report-pdf";
+import { useToast } from "@/components/shared/Toast";
+import { ADMIN_EMAIL } from "@/lib/ocr-quota";
+import { useGuildInsight } from "@/context/GuildInsightProvider";
 
 export function GPTReport({ t, guilds = [], activeGuild }) {
+  const { user } = useGuildInsight();
+  const { showToast } = useToast();
   const [guildId, setGuildId] = useState(activeGuild?.id ?? guilds[0]?.id);
   const [rptContent, setRptContent] = useState("전체");
   const [reports, setReports] = useState([]);
@@ -16,6 +22,13 @@ export function GPTReport({ t, guilds = [], activeGuild }) {
   const [error, setError] = useState(null);
   const [tableMissing, setTableMissing] = useState(false);
   const [notice, setNotice] = useState(null);
+  const reportPdfRef = useRef(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+
+  const isAdmin = user?.email === ADMIN_EMAIL;
+  const proOnlyMsg =
+    "해당 기능은 PRO 구독자 전용 기능입니다. 정식 결제 후 이용해 주세요.";
 
   const contentOptions = ["전체", ...CONTENTS_INIT];
 
@@ -528,6 +541,112 @@ NOTIFY pgrst, 'reload schema';`;
 
         {selected && (
           <>
+            {/* 데모와 동일 위치: 상세 상단 우측 버튼 */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12 }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!isAdmin) {
+                    showToast(proOnlyMsg);
+                    return;
+                  }
+                  if (!reportPdfRef.current || pdfBusy) return;
+                  setPdfBusy(true);
+                  try {
+                    reportPdfRef.current.scrollIntoView({ block: "start", behavior: "instant" });
+                    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+                    const safeName = String(selected.title || "report")
+                      .replace(/[\\/:*?"<>|]/g, "")
+                      .trim() || "report";
+                    await exportElementToPdf(reportPdfRef.current, `${safeName}.pdf`, {
+                      backgroundColor: t.bg,
+                    });
+                  } catch (e) {
+                    showToast(e?.message || "PDF 저장에 실패했습니다.");
+                  } finally {
+                    setPdfBusy(false);
+                  }
+                }}
+                disabled={pdfBusy}
+                style={{
+                  fontSize: 11,
+                  padding: "6px 13px",
+                  border: `1px solid ${t.borderStrong}`,
+                  borderRadius: 7,
+                  background: pdfBusy ? t.bgAlt : t.accentFaint,
+                  color: pdfBusy ? t.textMuted : t.accent,
+                  cursor: pdfBusy ? "wait" : "pointer",
+                  fontFamily: "'Courier New',monospace",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {pdfBusy ? "⟳ PDF 생성 중..." : "PDF 출력"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!isAdmin) {
+                    showToast(proOnlyMsg);
+                    return;
+                  }
+                  if (shareBusy) return;
+                  setShareBusy(true);
+                  try {
+                    const content =
+                      selected.content_filter && selected.content_filter !== "전체"
+                        ? selected.content_filter
+                        : "총력전";
+                    const gid = selected.guild_id ?? guildId;
+                    const res = await fetch("/api/discord/share-weekly-report", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        reportId: selected.id,
+                        guildId: gid,
+                        contentFilter: selected.content_filter || "전체",
+                        content,
+                      }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data?.error || "공유에 실패했습니다.");
+                    showToast("디스코드로 공유했습니다.");
+                  } catch (e) {
+                    showToast(e?.message || "공유에 실패했습니다.");
+                  } finally {
+                    setShareBusy(false);
+                  }
+                }}
+                disabled={shareBusy}
+                style={{
+                  fontSize: 11,
+                  padding: "6px 13px",
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 7,
+                  background: "transparent",
+                  color: t.textSub,
+                  cursor: shareBusy ? "wait" : "pointer",
+                  fontFamily: "'Courier New',monospace",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {shareBusy ? "⟳ 전송 중..." : "공유"}
+              </button>
+            </div>
+
+            {/* 캡처 대상: 데모처럼 카드 내부만 */}
+            <div
+              ref={reportPdfRef}
+              style={{
+                display: "block",
+                width: "100%",
+                boxSizing: "border-box",
+                background: t.bg,
+                // PDF 캡처 시 하단 출처 문구가 잘리지 않도록 하단 패딩을 넉넉히 둔다.
+                padding: "16px 18px 28px",
+                borderRadius: 11,
+                border: `1px solid ${t.rptBorder}`,
+              }}
+            >
             <div
               style={{
                 display: "flex",
@@ -699,6 +818,38 @@ NOTIFY pgrst, 'reload schema';`;
                 <span>생성: {selected.created_at?.split("T")[0]}</span>
               </div>
             )}
+
+            <div
+              style={{
+                marginTop: 14,
+                paddingTop: 10,
+                borderTop: `1px dashed ${t.border}`,
+                fontSize: 10,
+                color: t.textMuted,
+                lineHeight: 1.6,
+                opacity: 0.9,
+              }}
+            >
+              📄 본 리포트는 AI 기반 길드 관리 플랫폼{" "}
+              <strong style={{ color: t.accent, fontWeight: 700 }}>GUILD INSIGHT</strong>에서 생성되었습니다.{" "}
+              <span style={{ color: t.textMuted }}>
+                (출처:{" "}
+                <a
+                  href="https://guildinsightapp.vercel.app"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: t.accentDim,
+                    textDecoration: "underline dotted",
+                    textUnderlineOffset: 3,
+                  }}
+                >
+                  guildinsightapp.vercel.app
+                </a>
+                )
+              </span>
+            </div>
+            </div>
           </>
         )}
       </div>

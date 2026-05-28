@@ -8,6 +8,7 @@ import { useGuildInsight } from "@/context/GuildInsightProvider";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { Modal } from "@/components/shared/Modal";
+import { ToastProvider } from "@/components/shared/Toast";
 import { btnGhost, btnDanger } from "@/lib/styles";
 
 export function AppShell({ children }) {
@@ -36,20 +37,21 @@ export function AppShell({ children }) {
   };
 
   return (
-    <div
-      data-theme={dark ? "dark" : "light"}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        background: t.bg,
-        color: t.text,
-        fontFamily: "'Courier New',monospace",
-        transition: TR,
-        overflow: "hidden",
-        colorScheme: dark ? "dark" : "light",
-      }}
-    >
+    <ToastProvider>
+      <div
+        data-theme={dark ? "dark" : "light"}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          background: t.bg,
+          color: t.text,
+          fontFamily: "'Courier New',monospace",
+          transition: TR,
+          overflow: "hidden",
+          colorScheme: dark ? "dark" : "light",
+        }}
+      >
       <Topbar
         t={t}
         dark={dark}
@@ -83,6 +85,7 @@ export function AppShell({ children }) {
           </div>
         </div>
       </Modal>
-    </div>
+      </div>
+    </ToastProvider>
   );
 }

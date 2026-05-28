@@ -22,7 +22,7 @@ export async function GET() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, email, display_name, last_managed_guild_id")
+    .select("id, email, display_name, last_managed_guild_id, discord_webhook_url")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -54,6 +54,10 @@ export async function PUT(request) {
     }
     if (typeof body.display_name === "string") {
       patch.display_name = body.display_name;
+    }
+    if (typeof body.discord_webhook_url === "string") {
+      const raw = body.discord_webhook_url.trim();
+      patch.discord_webhook_url = raw ? raw : null;
     }
     if (Object.keys(patch).length === 0) {
       return NextResponse.json({ error: "변경할 필드가 없습니다." }, { status: 400 });

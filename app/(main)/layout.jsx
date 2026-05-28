@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { GuildInsightProvider } from "@/context/GuildInsightProvider";
 import { AppShell } from "@/components/layout/AppShell";
-import { getServerSupabase } from "@/lib/supabase-server";
+import { requireAuthUser } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 
@@ -18,14 +18,7 @@ export const dynamic = "force-dynamic";
  * 페이지 단에서 fetch 결과가 비어있거나 에러일 경우 /unauthorized 로 폴백한다.
  */
 export default async function MainLayout({ children }) {
-  const supabase = await getServerSupabase();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    redirect("/billing?auth=required");
-  }
+  const { user, supabase } = await requireAuthUser();
 
   const h = await headers();
   const pathname = h.get("x-pathname") || "";

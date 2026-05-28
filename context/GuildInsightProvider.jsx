@@ -88,6 +88,12 @@ export function GuildInsightProvider({
 
   const [user] = useState(initialUser);
 
+  useEffect(() => {
+    if (!initialUser?.id) {
+      router.replace("/billing?auth=required");
+    }
+  }, [initialUser, router]);
+
   // 초기 활성 길드 결정: sessionStorage 우선 힌트 → profile.last_managed_guild_id → 첫 번째
   const initialActivePickedRef = useRef(false);
 

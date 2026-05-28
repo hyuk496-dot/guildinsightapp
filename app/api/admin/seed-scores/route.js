@@ -5,15 +5,25 @@ import { supabase } from "@/lib/supabase";
 import { buildScoreSeedRows } from "@/lib/mock-score-seed";
 import { CONTRIBS_INIT } from "@/lib/mock-data";
 import { recentWeekMondays } from "@/lib/week-utils";
+import { getAuthUser } from "@/lib/auth-server";
+import { ADMIN_EMAIL } from "@/lib/ocr-quota";
 
 /**
  * Mock 점수 이력 → Supabase scores (주차 월요일 UTC, upsert)
  * POST /api/admin/seed-scores
- * 개발 환경에서만 실행 권장
+ * 개발 환경 + 관리자 세션에서만 실행
  */
 export async function POST() {
   if (process.env.NODE_ENV === "production" && !process.env.ALLOW_SCORE_SEED) {
     return NextResponse.json({ error: "production 에서는 비활성화" }, { status: 403 });
+  }
+
+  const { user } = await getAuthUser();
+  if (!user) {
+    return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+  }
+  if (user.email !== ADMIN_EMAIL) {
+    return NextResponse.json({ error: "관리자만 실행할 수 있습니다." }, { status: 403 });
   }
 
   try {

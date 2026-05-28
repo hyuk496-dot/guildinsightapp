@@ -32,8 +32,7 @@ export function AppShell({ children }) {
       console.warn("signOut 실패:", e);
     }
     alert("로그아웃 되었습니다.\n메인 페이지로 돌아갑니다.");
-    router.replace("/");
-    router.refresh();
+    window.location.href = "/auth/signout";
   };
 
   return (

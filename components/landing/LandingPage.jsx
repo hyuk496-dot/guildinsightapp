@@ -25,12 +25,46 @@ const RADAR_VALS = [0.92, 0.85, 0.88, 0.78, 0.82, 0.95];
 export function LandingPage() {
   return (
     <ToastProvider>
-      <Suspense fallback={<LandingPageInner />}>
+      <Suspense fallback={null}>
         <LandingAuthToast />
+        <LandingSessionGate />
       </Suspense>
       <LandingPageInner />
     </ToastProvider>
   );
+}
+
+/** 이미 로그인된 세션이 있으면 대시보드로, ?logout=1 이면 세션 삭제 */
+function LandingSessionGate() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      const { getBrowserSupabase } = await import("@/lib/supabase-browser");
+      const supa = getBrowserSupabase();
+
+      if (searchParams.get("logout") === "1") {
+        await supa.auth.signOut();
+        if (!cancelled) router.replace("/");
+        return;
+      }
+
+      const { data: { user }, error } = await supa.auth.getUser();
+      if (!cancelled && user?.id && !error) {
+        router.replace("/dashboard");
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [router, searchParams]);
+
+  return null;
 }
 
 function LandingAuthToast() {

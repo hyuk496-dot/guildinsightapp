@@ -1096,7 +1096,7 @@ function LandingPageInner() {
           .hero { flex-direction: column; }
           .hero-right { width: 100%; display: flex; justify-content: center; }
           .cards-row { grid-template-columns: 1fr; }
-          /* 모바일에서도 FEATURES/DEMO/PRICING 노출 */
+          /* 모바일: FEATURES만 노출 (DEMO/PRICING 숨김) */
           .nav {
             padding: 12px 14px;
             gap: 10px;
@@ -1108,6 +1108,7 @@ function LandingPageInner() {
             justify-content: center;
             font-size: 11px;
           }
+          .nav-links .nav-link:nth-child(n+2) { display: none; }
           .nav-link {
             padding: 8px 10px;
           }

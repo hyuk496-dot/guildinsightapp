@@ -175,6 +175,7 @@ async function sumMemberScoreForWeek({
   content,
   weekMonday,
   includeGuildFilter = true,
+  lastWeekQuery = false,
 }) {
   // 1) week_monday 컬럼이 있는 경우(정상)
   let q = supabase
@@ -191,6 +192,10 @@ async function sumMemberScoreForWeek({
   if (!res.error) {
     const rows = Array.isArray(res.data) ? res.data : [];
     const total = rows.reduce((s, r) => s + Number(r.score || 0), 0);
+    // 지난주로 조회했는데 해당 주차 row가 없으면 레거시 limit(30)으로 이번 주 점수를 끌어오지 않음
+    if (lastWeekQuery && rows.length === 0) {
+      return { total: 0, rows: [], used: "last_week_empty" };
+    }
     return { total, rows, used: "week_monday" };
   }
 
@@ -199,6 +204,10 @@ async function sumMemberScoreForWeek({
   const maybeMissingWeekMonday =
     res.error?.code === "42703" || msg.toLowerCase().includes("week_monday");
   if (!maybeMissingWeekMonday) throw res.error;
+
+  if (lastWeekQuery) {
+    return { total: 0, rows: [], used: "last_week_no_data" };
+  }
 
   // week_monday 컬럼이 없으면 "주차 한정"을 DB에서 할 수 없으므로,
   // 해당 멤버+컨텐츠의 "일부" 레코드를 합산(근사치)한다.
@@ -317,11 +326,34 @@ export async function POST(request) {
 
     const dateHit = extractDateFromQuestion(question);
     const hasDate = !!dateHit?.date;
-    const targetWeek = hasDate
+    let targetWeek = hasDate
       ? weekMondayKey(dateHit.date)
       : recentWeekMondays(1)?.[0] || weekMondayKey();
+    if (
+      !hasDate &&
+      (question.includes("지난주") ||
+        question.includes("전주") ||
+        question.includes("저번주"))
+    ) {
+      const prevMonday = new Date(`${targetWeek}T12:00:00`);
+      prevMonday.setDate(prevMonday.getDate() - 7);
+      targetWeek = weekMondayKey(prevMonday);
+    }
+
+    const weekWord =
+      question.includes("지난주") ||
+      question.includes("전주") ||
+      question.includes("저번주")
+        ? "지난주"
+        : "이번 주";
 
     const { content, source: contentSource } = pickContent({ question, contentFilter });
+
+    const wantsLastWeek =
+      !hasDate &&
+      (question.includes("지난주") ||
+        question.includes("전주") ||
+        question.includes("저번주"));
 
     const scoreRes = await sumMemberScoreForWeek({
       supabase,
@@ -330,9 +362,14 @@ export async function POST(request) {
       content,
       weekMonday: targetWeek,
       includeGuildFilter: !usedMemberFallback,
+      lastWeekQuery: wantsLastWeek,
     });
 
-    const totalScore = Number(scoreRes.total || 0);
+    const lastWeekNoData =
+      wantsLastWeek &&
+      (scoreRes.used === "last_week_empty" || scoreRes.used === "last_week_no_data");
+
+    const totalScore = lastWeekNoData ? 0 : Number(scoreRes.total || 0);
     const weekLabel = formatWeekDisplay(targetWeek);
 
     // [단계 3] 이름 + 날짜 + 컨텐츠(질문에서 컨텐츠가 명시되고, 필터와 다르면 stage 3)
@@ -351,7 +388,9 @@ export async function POST(request) {
         ? `${dateHit?.label || weekLabel} 주차 ${mentionedContent} 확인 결과, ${nick} 님의 점수는 ${totalScore.toLocaleString()}점입니다.`
         : stage === 2
           ? `${dateHit?.label || weekLabel} 주차 확인 결과, ${nick} 님의 ${prettyContent} 점수는 ${totalScore.toLocaleString()}점입니다.`
-          : `DB 확인 결과, 이번 주 ${nick} 님의 ${prettyContent} 점수는 ${totalScore.toLocaleString()}점입니다.`;
+          : lastWeekNoData
+            ? `DB 확인 결과, ${weekWord} ${nick} 님의 ${prettyContent} 데이터가 입력되지 않았거나 0점입니다.`
+            : `DB 확인 결과, ${weekWord} ${nick} 님의 ${prettyContent} 점수는 ${totalScore.toLocaleString()}점입니다.`;
 
     return NextResponse.json(
       {

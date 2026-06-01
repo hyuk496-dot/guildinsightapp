@@ -9,6 +9,16 @@ import { listContentTabs } from "@/lib/contents-catalog";
 import { formatWeekDisplay } from "@/lib/week-utils";
 import { MAX_BOOST, simulateGuildRank } from "@/lib/ranking-goals";
 import {
+  loadVirtualCompetitors,
+  persistVirtualCompetitors,
+  createVirtualCompetitorId,
+  virtualCompetitorsToRankRows,
+  assertCanAddVirtualCompetitors,
+  filterVirtualCompetitorsByGame,
+  MAX_VIRTUAL_COMPETITORS_PER_GAME,
+  MAX_SERVER_RANKS_IN_SIM,
+} from "@/lib/virtual-competitors-storage";
+import {
   ResponsiveContainer,
   LineChart,
   Line,
@@ -59,6 +69,10 @@ function SimScoreInline({ total, scenarioBonus, guildBoost, t, fontSize = 11 }) 
 }
 
 const BOOST_STEP = 100_000; // 10만 단위 정밀 조절
+const RANK_ROW_H = 36;
+const SERVER_TABLE_MAX_H = RANK_ROW_H * 10;
+const RIVAL_LIST_MAX_H = RANK_ROW_H * 5;
+const SERVER_MIN_SLOTS = 5;
 
 export function RankingGoals({ t, guilds, activeGuild }) {
   const { contents, resolveContentDbNames } = useGuildInsight();
@@ -72,6 +86,23 @@ export function RankingGoals({ t, guilds, activeGuild }) {
   const [error, setError] = useState(null);
   const [activePreset, setActivePreset] = useState(null);
   const [savedTarget, setSavedTarget] = useState(null);
+  const [virtualCompetitors, setVirtualCompetitors] = useState([]);
+  const [rivalFormOpen, setRivalFormOpen] = useState(false);
+  const [rivalName, setRivalName] = useState("");
+  const [rivalScore, setRivalScore] = useState("");
+  const [editingRivalId, setEditingRivalId] = useState(null);
+  const [editRivalName, setEditRivalName] = useState("");
+  const [editRivalScore, setEditRivalScore] = useState("");
+
+  useEffect(() => {
+    setVirtualCompetitors(loadVirtualCompetitors());
+  }, []);
+
+  const commitVirtualCompetitors = (next) => {
+    const res = persistVirtualCompetitors(next);
+    if (res.ok) setVirtualCompetitors(res.list);
+    return res.ok;
+  };
 
   useEffect(() => {
     if (activeGuild?.id) setGuildId(activeGuild.id);
@@ -138,7 +169,30 @@ export function RankingGoals({ t, guilds, activeGuild }) {
     };
   }, [guildId, content, weekKey]);
 
+  const currentGuild = guilds.find((g) => g.id === guildId) || guilds[0];
+  const gameName = data?.gameName || currentGuild?.game_name || currentGuild?.game || "—";
+
+  const rivalsForGame = useMemo(
+    () => filterVirtualCompetitorsByGame(virtualCompetitors, gameName),
+    [virtualCompetitors, gameName]
+  );
+
+  useEffect(() => {
+    setRivalFormOpen(false);
+    setEditingRivalId(null);
+    setEditRivalName("");
+    setEditRivalScore("");
+  }, [gameName, guildId]);
+
   const ranks = data?.ranks || [];
+  const serverRanksCapped = useMemo(() => ranks.slice(0, MAX_SERVER_RANKS_IN_SIM), [ranks]);
+  const mergedRanks = useMemo(
+    () => [
+      ...serverRanksCapped,
+      ...virtualCompetitorsToRankRows(rivalsForGame),
+    ],
+    [serverRanksCapped, rivalsForGame]
+  );
   const ourBase = data?.ourBaseScore ?? 0;
   const baseForSim = activePreset
     ? data?.scenarios?.[activePreset]?.totalScore ?? ourBase
@@ -158,12 +212,73 @@ export function RankingGoals({ t, guilds, activeGuild }) {
   const finalExpectedTotal = ourBase + scenarioBonus + guildBoost;
 
   const sim = useMemo(
-    () => simulateGuildRank(ranks, simulatedTotal),
-    [ranks, simulatedTotal]
+    () => simulateGuildRank(mergedRanks, simulatedTotal),
+    [mergedRanks, simulatedTotal]
   );
 
-  const currentGuild = guilds.find((g) => g.id === guildId) || guilds[0];
-  const gameName = data?.gameName || currentGuild?.game_name || currentGuild?.game || "—";
+  /** DB + 로컬 라이벌 통합 정렬 결과 (슬라이더·시나리오 반영) */
+  const rankTableRows = useMemo(
+    () => sim.sorted.map((r, idx) => ({ ...r, rank: idx + 1 })),
+    [sim.sorted]
+  );
+
+  const competitorCount = rankTableRows.filter((r) => !r.ours).length;
+  const showRankEmptyHint = competitorCount === 0;
+
+  const rankTableSlots = useMemo(() => {
+    if (!showRankEmptyHint || rankTableRows.length >= SERVER_MIN_SLOTS) {
+      return rankTableRows;
+    }
+    const slots = [...rankTableRows];
+    while (slots.length < SERVER_MIN_SLOTS) {
+      slots.push({ isPlaceholder: true, guildId: `ph-${slots.length}` });
+    }
+    return slots;
+  }, [rankTableRows, showRankEmptyHint]);
+
+  const addRivalGuild = () => {
+    const name = rivalName.trim();
+    if (!name) return;
+    if (!assertCanAddVirtualCompetitors(virtualCompetitors, gameName)) return;
+    const score = Math.max(0, Math.round(Number(rivalScore) || 0));
+    const next = [
+      ...virtualCompetitors,
+      { id: createVirtualCompetitorId(), name, score, game: gameName },
+    ];
+    if (commitVirtualCompetitors(next)) {
+      setRivalName("");
+      setRivalScore("");
+      setRivalFormOpen(false);
+    }
+  };
+
+  const startEditRival = (v) => {
+    setEditingRivalId(v.id);
+    setEditRivalName(v.name);
+    setEditRivalScore(String(v.score));
+  };
+
+  const cancelEditRival = () => {
+    setEditingRivalId(null);
+    setEditRivalName("");
+    setEditRivalScore("");
+  };
+
+  const saveEditRival = () => {
+    const name = editRivalName.trim();
+    if (!name || !editingRivalId) return;
+    const score = Math.max(0, Math.round(Number(editRivalScore) || 0));
+    const next = virtualCompetitors.map((v) =>
+      v.id === editingRivalId ? { ...v, name, score } : v
+    );
+    if (commitVirtualCompetitors(next)) cancelEditRival();
+  };
+
+  const deleteRivalGuild = (id) => {
+    const next = virtualCompetitors.filter((v) => v.id !== id);
+    commitVirtualCompetitors(next);
+    if (editingRivalId === id) cancelEditRival();
+  };
 
   const applyBoost = (value) => {
     const v = Math.max(0, Math.min(MAX_BOOST, Math.round(Number(value) || 0)));
@@ -618,16 +733,111 @@ export function RankingGoals({ t, guilds, activeGuild }) {
                 ) : null}
               </div>
             </div>
+
+            <div
+              style={{
+                background: t.bgCard,
+                border: `1px solid ${t.border}`,
+                borderRadius: 12,
+                padding: "16px 18px",
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 8 }}>
+                이번 주 목표 vs 실시간 누적 입력
+              </div>
+              <div
+                style={{
+                  height: 180,
+                  background: t.bgAlt,
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 10,
+                  padding: "10px 10px 6px",
+                }}
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={weekProgress} margin={{ top: 6, right: 10, bottom: 4, left: 0 }}>
+                    <CartesianGrid stroke={t.chartGrid} strokeWidth={0.6} vertical={false} />
+                    <XAxis
+                      dataKey="dayLabel"
+                      tick={{ fill: t.textMuted, fontSize: 10 }}
+                      axisLine={{ stroke: t.border }}
+                      tickLine={{ stroke: t.border }}
+                    />
+                    <YAxis
+                      domain={[0, chartMax]}
+                      tick={{ fill: t.textMuted, fontSize: 10 }}
+                      axisLine={{ stroke: t.border }}
+                      tickLine={{ stroke: t.border }}
+                      width={44}
+                      tickFormatter={(v) => {
+                        const n = Number(v || 0);
+                        return n >= 1_000_000
+                          ? `${Math.round(n / 1_000_000)}m`
+                          : `${Math.round(n / 1000)}k`;
+                      }}
+                    />
+                    <Tooltip
+                      formatter={(value) => [formatNum(value), "누적 점수"]}
+                      labelFormatter={(label) => `${label}요일`}
+                      contentStyle={{
+                        background: t.bgCard,
+                        border: `1px solid ${t.border}`,
+                        borderRadius: 8,
+                        fontSize: 11,
+                        color: t.text,
+                      }}
+                    />
+                    {savedTarget ? (
+                      <ReferenceLine
+                        y={savedTarget}
+                        stroke="#ff5b5b"
+                        strokeDasharray="6 4"
+                        strokeWidth={1.4}
+                        ifOverflow="extendDomain"
+                      />
+                    ) : null}
+                    <Area
+                      type="monotone"
+                      dataKey="cumulative"
+                      stroke="none"
+                      fillOpacity={0.18}
+                      fill={t.accent}
+                      isAnimationActive
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="cumulative"
+                      stroke={t.accent}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, lineHeight: 1.5 }}>
+                파란선: 이번 주 입력 누적 · 빨간 점선: 저장된 목표 총점
+              </div>
+            </div>
           </div>
 
           <div
             style={{
-              background: t.bgCard,
-              border: `1px solid ${t.border}`,
-              borderRadius: 12,
-              padding: "16px 18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              minHeight: 0,
             }}
           >
+            <div
+              style={{
+                background: t.bgCard,
+                border: `1px solid ${t.border}`,
+                borderRadius: 12,
+                padding: "16px 18px",
+                flex: "0 0 auto",
+              }}
+            >
             <div style={{ fontSize: 12, fontWeight: 500, color: t.text, marginBottom: 14 }}>
               {content} 순위 시뮬레이션
             </div>
@@ -695,139 +905,457 @@ export function RankingGoals({ t, guilds, activeGuild }) {
             </div>
 
             <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 8 }}>
-              예상 순위표 ({gameName} · {content})
+              예상 순위표 ({gameName} · {content}) · 서버+라이벌 통합
             </div>
-            <div style={{ maxHeight: 320, overflowY: "auto" }}>
-              {sim.sorted.map((r, i) => (
+            <div
+              style={{
+                position: "relative",
+                maxHeight: SERVER_TABLE_MAX_H,
+                overflowY: "auto",
+                overflowX: "hidden",
+              }}
+            >
+              {showRankEmptyHint && (
                 <div
-                  key={r.guildId}
                   style={{
+                    position: "absolute",
+                    inset: 0,
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
-                    padding: "7px 10px",
-                    borderRadius: 6,
-                    background: r.ours ? t.accentFaint : t.bgAlt,
-                    border: r.ours ? `1px solid ${t.borderStrong}` : `0.5px solid ${t.border}`,
-                    marginBottom: 4,
+                    justifyContent: "center",
+                    pointerEvents: "none",
+                    zIndex: 1,
+                    padding: "0 12px",
                   }}
                 >
                   <span
                     style={{
-                      width: 20,
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: i === 0 ? "#d4a017" : r.ours ? t.accent : t.textMuted,
+                      fontSize: 10,
+                      color: t.textMuted,
+                      textAlign: "center",
+                      lineHeight: 1.5,
                     }}
                   >
-                    {i + 1}
+                    현재 동일 게임 타 길드 정보가 없습니다
                   </span>
-                  <span
-                    style={{
-                      flex: 1,
-                      fontSize: 11,
-                      color: r.ours ? t.accent : t.text,
-                      fontWeight: r.ours ? 500 : 400,
-                    }}
-                  >
-                    {r.name}
-                    {r.ours ? " ★" : ""}
-                  </span>
-                  {r.ours ? (
-                    <span style={{ flexShrink: 0, textAlign: "right" }}>
-                      <SimScoreInline
-                        total={r.simScore}
-                        scenarioBonus={scenarioBonus}
-                        guildBoost={guildBoost}
-                        t={t}
-                        fontSize={10}
-                      />
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 11, fontWeight: 500, color: t.text }}>
-                      {formatNum(r.simScore)}
-                    </span>
-                  )}
                 </div>
-              ))}
+              )}
+              {rankTableSlots.map((r) =>
+                r.isPlaceholder ? (
+                  <div
+                    key={r.guildId}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      minHeight: RANK_ROW_H,
+                      padding: "7px 10px",
+                      borderRadius: 6,
+                      background: "transparent",
+                      border: `0.5px dashed ${t.border}`,
+                      marginBottom: 4,
+                      opacity: 0.35,
+                    }}
+                  >
+                    <span style={{ flex: 1, fontSize: 10, color: "transparent" }}>—</span>
+                  </div>
+                ) : (
+                  <div
+                    key={r.guildId}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      minHeight: RANK_ROW_H,
+                      padding: "7px 10px",
+                      borderRadius: 6,
+                      background: r.ours
+                        ? t.accentFaint
+                        : r.isVirtual
+                          ? "rgba(148, 163, 184, 0.06)"
+                          : t.bgAlt,
+                      border: r.ours
+                        ? `1px solid ${t.borderStrong}`
+                        : r.isVirtual
+                          ? `0.5px dashed ${t.border}`
+                          : `0.5px solid ${t.border}`,
+                      marginBottom: 4,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 20,
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color:
+                          r.rank === 1 ? "#d4a017" : r.ours ? t.accent : t.textMuted,
+                      }}
+                    >
+                      {r.rank}
+                    </span>
+                    <span
+                      style={{
+                        flex: 1,
+                        fontSize: 11,
+                        color: r.ours ? t.accent : t.text,
+                        fontWeight: r.ours || r.isVirtual ? 500 : 400,
+                        minWidth: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      {r.isVirtual ? (
+                        <span
+                          style={{
+                            fontSize: 8,
+                            padding: "1px 6px",
+                            borderRadius: 4,
+                            background: "rgba(148, 163, 184, 0.15)",
+                            border: `1px solid ${t.border}`,
+                            color: t.textMuted,
+                            fontWeight: 600,
+                            flexShrink: 0,
+                          }}
+                        >
+                          라이벌
+                        </span>
+                      ) : null}
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {r.name}
+                        {r.ours ? " ★" : ""}
+                      </span>
+                    </span>
+                    {r.ours ? (
+                      <span style={{ flexShrink: 0, textAlign: "right" }}>
+                        <SimScoreInline
+                          total={r.simScore}
+                          scenarioBonus={scenarioBonus}
+                          guildBoost={guildBoost}
+                          t={t}
+                          fontSize={10}
+                        />
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 500,
+                          color: r.isVirtual ? t.text : t.text,
+                          fontFamily: "'Courier New',monospace",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {formatNum(r.simScore)}
+                      </span>
+                    )}
+                  </div>
+                )
+              )}
+            </div>
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 500, color: t.text, marginBottom: 8 }}>
-                이번 주 목표 vs 실시간 누적 입력
-              </div>
+            <div
+              style={{
+                background: t.bgCard,
+                border: `1px solid ${t.border}`,
+                borderRadius: 12,
+                padding: "16px 18px",
+                flex: "0 0 auto",
+              }}
+            >
               <div
                 style={{
-                  height: 180,
-                  background: t.bgAlt,
-                  border: `1px solid ${t.border}`,
-                  borderRadius: 10,
-                  padding: "10px 10px 6px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  marginBottom: 6,
+                  flexWrap: "wrap",
                 }}
               >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={weekProgress} margin={{ top: 6, right: 10, bottom: 4, left: 0 }}>
-                    <CartesianGrid stroke={t.chartGrid} strokeWidth={0.6} vertical={false} />
-                    <XAxis
-                      dataKey="dayLabel"
-                      tick={{ fill: t.textMuted, fontSize: 10 }}
-                      axisLine={{ stroke: t.border }}
-                      tickLine={{ stroke: t.border }}
-                    />
-                    <YAxis
-                      domain={[0, chartMax]}
-                      tick={{ fill: t.textMuted, fontSize: 10 }}
-                      axisLine={{ stroke: t.border }}
-                      tickLine={{ stroke: t.border }}
-                      width={44}
-                      tickFormatter={(v) => {
-                        const n = Number(v || 0);
-                        return n >= 1_000_000 ? `${Math.round(n / 1_000_000)}m` : `${Math.round(n / 1000)}k`;
-                      }}
-                    />
-                    <Tooltip
-                      formatter={(value) => [formatNum(value), "누적 점수"]}
-                      labelFormatter={(label) => `${label}요일`}
-                      contentStyle={{
-                        background: t.bgCard,
-                        border: `1px solid ${t.border}`,
-                        borderRadius: 8,
-                        fontSize: 11,
-                        color: t.text,
-                      }}
-                    />
-
-                    {savedTarget ? (
-                      <ReferenceLine
-                        y={savedTarget}
-                        stroke="#ff5b5b"
-                        strokeDasharray="6 4"
-                        strokeWidth={1.4}
-                        ifOverflow="extendDomain"
-                      />
-                    ) : null}
-
-                    <Area
-                      type="monotone"
-                      dataKey="cumulative"
-                      stroke="none"
-                      fillOpacity={0.18}
-                      fill={t.accent}
-                      isAnimationActive
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="cumulative"
-                      stroke={t.accent}
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                <span style={{ fontSize: 11, fontWeight: 500, color: t.text }}>
+                  경쟁 길드 관리
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRivalFormOpen((o) => !o)}
+                  style={{
+                    fontSize: 10,
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    border: `1px solid ${t.borderStrong}`,
+                    background: rivalFormOpen ? t.accentFaint : t.bgAlt,
+                    color: t.accent,
+                    cursor: "pointer",
+                    fontFamily: "'Courier New',monospace",
+                  }}
+                >
+                  + 라이벌 추가
+                </button>
               </div>
-              <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, lineHeight: 1.5 }}>
-                파란선: 이번 주 입력 누적 · 빨간 점선: 저장된 목표 총점
+              <p
+                style={{
+                  fontSize: 9,
+                  color: t.textMuted,
+                  lineHeight: 1.55,
+                  margin: "0 0 10px",
+                }}
+              >
+                ⚠️ 라이벌 길드는 각 게임별 최대 {MAX_VIRTUAL_COMPETITORS_PER_GAME}개까지 등록
+                가능하며, 브라우저 쿠키/캐시 삭제 시 데이터가 함께 초기화될 수 있습니다.
+              </p>
+
+              {rivalFormOpen && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    alignItems: "flex-end",
+                    marginBottom: 10,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    background: t.bgAlt,
+                    border: `1px solid ${t.border}`,
+                  }}
+                >
+                  <label style={{ flex: "1 1 120px", minWidth: 100 }}>
+                    <span style={{ fontSize: 9, color: t.textMuted, display: "block", marginBottom: 4 }}>
+                      길드명
+                    </span>
+                    <input
+                      type="text"
+                      value={rivalName}
+                      onChange={(e) => setRivalName(e.target.value)}
+                      placeholder="라이벌 길드명"
+                      maxLength={40}
+                      style={{
+                        width: "100%",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        border: `1px solid ${t.border}`,
+                        background: t.inputBg,
+                        color: t.text,
+                        fontSize: 11,
+                      }}
+                    />
+                  </label>
+                  <label style={{ flex: "0 1 100px", minWidth: 80 }}>
+                    <span style={{ fontSize: 9, color: t.textMuted, display: "block", marginBottom: 4 }}>
+                      점수
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={rivalScore}
+                      onChange={(e) => setRivalScore(e.target.value)}
+                      placeholder="0"
+                      style={{
+                        width: "100%",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        border: `1px solid ${t.border}`,
+                        background: t.inputBg,
+                        color: t.text,
+                        fontSize: 11,
+                        fontFamily: "'Courier New',monospace",
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={addRivalGuild}
+                    style={{
+                      fontSize: 10,
+                      padding: "7px 12px",
+                      borderRadius: 6,
+                      border: `1px solid ${t.borderStrong}`,
+                      background: t.accentFaint,
+                      color: t.accent,
+                      cursor: "pointer",
+                      fontWeight: 500,
+                    }}
+                  >
+                    등록
+                  </button>
+                </div>
+              )}
+
+              <div
+                style={{
+                  maxHeight: RIVAL_LIST_MAX_H,
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                {rivalsForGame.length === 0 ? (
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: t.textMuted,
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      background: t.bgAlt,
+                      textAlign: "center",
+                    }}
+                  >
+                    등록된 라이벌 길드가 없습니다. 위 버튼으로 추가하면 순위표에 반영됩니다.
+                  </div>
+                ) : (
+                  rivalsForGame.map((v) => (
+                    <div
+                      key={v.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "8px 10px",
+                        borderRadius: 6,
+                        background: t.bgAlt,
+                        border: `0.5px dashed ${t.border}`,
+                      }}
+                    >
+                      {editingRivalId === v.id ? (
+                        <>
+                          <input
+                            type="text"
+                            value={editRivalName}
+                            onChange={(e) => setEditRivalName(e.target.value)}
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              padding: "4px 8px",
+                              borderRadius: 5,
+                              border: `1px solid ${t.border}`,
+                              background: t.inputBg,
+                              color: t.text,
+                              fontSize: 11,
+                            }}
+                          />
+                          <input
+                            type="number"
+                            min={0}
+                            value={editRivalScore}
+                            onChange={(e) => setEditRivalScore(e.target.value)}
+                            style={{
+                              width: 88,
+                              padding: "4px 8px",
+                              borderRadius: 5,
+                              border: `1px solid ${t.border}`,
+                              background: t.inputBg,
+                              color: t.text,
+                              fontSize: 11,
+                              fontFamily: "'Courier New',monospace",
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={saveEditRival}
+                            style={{
+                              fontSize: 9,
+                              padding: "4px 8px",
+                              borderRadius: 5,
+                              border: `1px solid ${t.borderStrong}`,
+                              background: t.accentFaint,
+                              color: t.accent,
+                              cursor: "pointer",
+                            }}
+                          >
+                            저장
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditRival}
+                            style={{
+                              fontSize: 9,
+                              padding: "4px 8px",
+                              borderRadius: 5,
+                              border: `1px solid ${t.border}`,
+                              background: "transparent",
+                              color: t.textMuted,
+                              cursor: "pointer",
+                            }}
+                          >
+                            취소
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span
+                            style={{
+                              flex: 1,
+                              fontSize: 11,
+                              color: t.text,
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {v.name}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 500,
+                              color: t.text,
+                              fontFamily: "'Courier New',monospace",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {formatNum(v.score)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => startEditRival(v)}
+                            style={{
+                              fontSize: 9,
+                              padding: "3px 8px",
+                              borderRadius: 5,
+                              border: `1px solid ${t.border}`,
+                              background: "transparent",
+                              color: t.textSub,
+                              cursor: "pointer",
+                              flexShrink: 0,
+                            }}
+                          >
+                            수정
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteRivalGuild(v.id)}
+                            title="삭제"
+                            style={{
+                              fontSize: 9,
+                              padding: "3px 8px",
+                              borderRadius: 5,
+                              border: "1px solid rgba(255,91,91,0.35)",
+                              background: "rgba(255,91,91,0.1)",
+                              color: "#ff5b5b",
+                              cursor: "pointer",
+                              flexShrink: 0,
+                            }}
+                          >
+                            X 삭제
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+              <div style={{ fontSize: 9, color: t.textMuted, marginTop: 8 }}>
+                {gameName} 라이벌 등록 {rivalsForGame.length} / {MAX_VIRTUAL_COMPETITORS_PER_GAME}
               </div>
             </div>
           </div>

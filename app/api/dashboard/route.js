@@ -3,6 +3,10 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import { getAdminSupabase } from "@/lib/supabase-admin";
+import {
+  parseContentNamesFromSearchParams,
+  applyContentNameFilterToQuery,
+} from "@/lib/content-utils";
 import { buildGuildWeeklyChart } from "@/lib/dashboard-utils";
 import { buildServerRankings } from "@/lib/server-rank-utils";
 import { computeContentParticipation } from "@/lib/dashboard-activity";
@@ -16,10 +20,13 @@ export async function GET(request) {
 
   const { searchParams } = new URL(request.url);
   const guildId = searchParams.get("guild_id");
-  const content = searchParams.get("content") || "총력전";
+  const { content, names } = parseContentNamesFromSearchParams(searchParams);
 
   if (!guildId) {
     return NextResponse.json({ error: "guild_id 필요" }, { status: 400 });
+  }
+  if (!names.length) {
+    return NextResponse.json({ error: "content 필요" }, { status: 400 });
   }
 
   try {
@@ -29,11 +36,10 @@ export async function GET(request) {
       { data: guildRow },
       { data: myMembers },
     ] = await Promise.all([
-      supabase
-        .from("scores")
-        .select("*")
-        .eq("guild_id", Number(guildId))
-        .eq("content_name", content),
+      applyContentNameFilterToQuery(
+        supabase.from("scores").select("*").eq("guild_id", Number(guildId)),
+        names
+      ),
       supabase
         .from("guilds")
         .select("id, name, game_name")
@@ -67,17 +73,20 @@ export async function GET(request) {
       const gameGuildIds = (sameGameGuilds || []).map((g) => Number(g.id));
 
       const { data: scoresAll } = gameGuildIds.length
-        ? await admin
-            .from("scores")
-            .select("guild_id, content_name, score, week_monday, created_at, updated_at")
-            .eq("content_name", content)
-            .in("guild_id", gameGuildIds)
+        ? await applyContentNameFilterToQuery(
+            admin
+              .from("scores")
+              .select("guild_id, content_name, score, week_monday, created_at, updated_at")
+              .in("guild_id", gameGuildIds),
+            names
+          )
         : { data: [] };
 
       serverRanks = buildServerRankings(scoresAll || [], sameGameGuilds || [], {
         contentName: content,
         gameName,
         currentGuildId: guildId,
+        dbNames: names,
       });
     } catch (rankErr) {
       // service-role 키 미설정 등으로 admin client 실패 시 본인 길드만 랭킹화
@@ -90,16 +99,18 @@ export async function GET(request) {
         contentName: content,
         gameName,
         currentGuildId: guildId,
+        dbNames: names,
       });
       serverRanks = fallback;
     }
 
-    const chart = buildGuildWeeklyChart(myScores || [], guildId, content, 6);
+    const chart = buildGuildWeeklyChart(myScores || [], guildId, content, 6, names);
 
     const participation = computeContentParticipation(
       myScores || [],
       myMembers || [],
-      content
+      content,
+      names
     );
 
     // 랭킹 기준 주의 합계(컨텐츠별 주간 점수 카드와 일치)

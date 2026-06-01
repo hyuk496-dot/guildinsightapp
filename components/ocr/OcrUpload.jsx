@@ -6,6 +6,7 @@ import { ROUTES } from "@/lib/navigation";
 import { selectStyle, optionStyle } from "@/lib/styles";
 import { attachMemberIds, summarizeOcrRows } from "@/lib/ocr-parse";
 import { weekMondayUtcIso } from "@/lib/week-utils";
+import { listContentTabs } from "@/lib/contents-catalog";
 
 export function OcrUpload({
   t,
@@ -19,9 +20,19 @@ export function OcrUpload({
 }) {
   const [rows, setRows] = useState([]);
   const [checked, setChecked] = useState({});
+  const contentTabs = listContentTabs(contents);
   const [saveContent, setSaveContent] = useState(
-    ocrSession?.contentName || contents[0] || "총력전"
+    ocrSession?.contentName || contentTabs[0] || ""
   );
+
+  useEffect(() => {
+    if (saveContent && contentTabs.includes(saveContent)) return;
+    if (ocrSession?.contentName && contentTabs.includes(ocrSession.contentName)) {
+      setSaveContent(ocrSession.contentName);
+      return;
+    }
+    if (contentTabs[0]) setSaveContent(contentTabs[0]);
+  }, [contentTabs, ocrSession?.contentName]);
   const [saveGuildId, setSaveGuildId] = useState(
     ocrSession?.guildId ?? defaultGuildId ?? guilds[0]?.id
   );
@@ -643,7 +654,7 @@ export function OcrUpload({
               onChange={(e) => setSaveContent(e.target.value)}
               style={{ ...selectStyle(t), padding: "5px 9px", fontSize: 11, minWidth: 100 }}
             >
-              {contents.map((c) => (
+              {contentTabs.map((c) => (
                 <option key={c} value={c} style={optionStyle(t)}>
                   {c}
                 </option>

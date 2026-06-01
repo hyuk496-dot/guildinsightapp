@@ -2,20 +2,24 @@
 
 import { useState, useEffect, useRef } from "react";
 import { TR } from "@/lib/theme";
-import { CONTENTS_INIT } from "@/lib/mock-data";
 import { guildForUi, resolveGuildMemberCount } from "@/lib/guild-display";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
+import { useSyncedContentSelection } from "@/lib/use-synced-content";
+import { buildContentQueryString } from "@/lib/content-fetch";
+import { listContentTabs } from "@/lib/contents-catalog";
 import { ContribScatterChart } from "@/components/dashboard/ContribScatterChart";
 import { GuildRadarChart } from "@/components/dashboard/GuildRadarChart";
 
 export function Dashboard({ t, guild }) {
-  const { membersData, scoresData, contents } = useGuildInsight();
+  const { membersData, scoresData, contents, resolveContentDbNames } =
+    useGuildInsight();
+  const [chartContent, setChartContent] = useSyncedContentSelection(contents);
+  const contentTabs = listContentTabs(contents);
   const guildKey = guild?.id != null ? String(guild.id) : "";
   const guildMembers =
     membersData?.[guildKey] ?? membersData?.[guild?.id] ?? [];
   const guildScores =
     scoresData?.[guildKey] ?? scoresData?.[guild?.id] ?? {};
-  const [chartContent, setChartContent] = useState("총력전");
   const [chartData, setChartData] = useState(null);
   const [chartLoading, setChartLoading] = useState(false);
   const memberCount = resolveGuildMemberCount(
@@ -40,7 +44,8 @@ export function Dashboard({ t, guild }) {
     if (!guild?.id) return;
     let cancelled = false;
     setChartLoading(true);
-    fetch(`/api/dashboard?guild_id=${guild.id}&content=${encodeURIComponent(chartContent)}`)
+    const contentQs = buildContentQueryString(chartContent, resolveContentDbNames);
+    fetch(`/api/dashboard?guild_id=${guild.id}&${contentQs}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled) setChartData(data);
@@ -54,7 +59,7 @@ export function Dashboard({ t, guild }) {
     return () => {
       cancelled = true;
     };
-  }, [guild?.id, chartContent]);
+  }, [guild?.id, chartContent, resolveContentDbNames]);
 
   const mets = g
     ? [
@@ -211,7 +216,7 @@ export function Dashboard({ t, guild }) {
               </span>
             </div>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {CONTENTS_INIT.map((c) => (
+              {contentTabs.map((c) => (
                 <button
                   key={c}
                   onClick={() => setChartContent(c)}

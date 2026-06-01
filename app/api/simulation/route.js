@@ -3,6 +3,11 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import { getAdminSupabase } from "@/lib/supabase-admin";
+import {
+  matchesContentName,
+  parseContentNamesFromSearchParams,
+  applyContentNameFilterToQuery,
+} from "@/lib/content-utils";
 import { buildServerRankings } from "@/lib/server-rank-utils";
 import { buildParticipationScenarios } from "@/lib/ranking-goals";
 import { buildWeekCumulativeSeries } from "@/lib/weekly-progress";
@@ -16,10 +21,13 @@ export async function GET(request) {
 
   const { searchParams } = new URL(request.url);
   const guildId = searchParams.get("guild_id");
-  const content = searchParams.get("content") || "총력전";
+  const { content, names } = parseContentNamesFromSearchParams(searchParams);
 
   if (!guildId) {
     return NextResponse.json({ error: "guild_id 필요" }, { status: 400 });
+  }
+  if (!names.length) {
+    return NextResponse.json({ error: "content 필요" }, { status: 400 });
   }
 
   try {
@@ -49,8 +57,8 @@ export async function GET(request) {
     if (scoreErr) throw scoreErr;
 
     const gameName = guildRow.game_name || guildRow.game || "미지정 게임";
-    const contentScores = (myScores || []).filter(
-      (s) => s.content_name === content
+    const contentScores = (myScores || []).filter((s) =>
+      matchesContentName(s.content_name, content, names)
     );
 
     let ranking = { ranks: [], currentRank: null, weekMonday: null };
@@ -66,19 +74,22 @@ export async function GET(request) {
 
       const gameGuildIds = sameGameGuilds.map((g) => Number(g.id));
       const { data: scoresAll } = gameGuildIds.length
-        ? await admin
-            .from("scores")
-            .select(
-              "guild_id, content_name, score, week_monday, created_at, updated_at, member_id"
-            )
-            .eq("content_name", content)
-            .in("guild_id", gameGuildIds)
+        ? await applyContentNameFilterToQuery(
+            admin
+              .from("scores")
+              .select(
+                "guild_id, content_name, score, week_monday, created_at, updated_at, member_id"
+              )
+              .in("guild_id", gameGuildIds),
+            names
+          )
         : { data: [] };
 
       ranking = buildServerRankings(scoresAll || [], sameGameGuilds, {
         contentName: content,
         gameName,
         currentGuildId: guildId,
+        dbNames: names,
       });
     } catch (rankErr) {
       console.warn(
@@ -89,6 +100,7 @@ export async function GET(request) {
         contentName: content,
         gameName,
         currentGuildId: guildId,
+        dbNames: names,
       });
     }
 
@@ -108,7 +120,7 @@ export async function GET(request) {
       participation?.activityWeek || ranking.weekMonday || null;
     const weekProgress =
       activityWeek != null
-        ? buildWeekCumulativeSeries(myScores || [], guildId, content, activityWeek)
+        ? buildWeekCumulativeSeries(myScores || [], guildId, content, activityWeek, names)
         : { weekKey: null, series: [] };
 
     return NextResponse.json({

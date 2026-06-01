@@ -52,7 +52,10 @@ export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const reportId = body?.reportId != null ? Number(body.reportId) : null;
   const guildId = body?.guildId != null ? Number(body.guildId) : null;
-  const content = String(body?.content || "총력전");
+  const content = String(body?.content || "").trim();
+  if (!content) {
+    return NextResponse.json({ error: "content 필요" }, { status: 400 });
+  }
   const contentFilter = String(body?.contentFilter || "전체");
   if (!guildId || !Number.isFinite(guildId)) {
     return NextResponse.json({ error: "guildId 필요" }, { status: 400 });

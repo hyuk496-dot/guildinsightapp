@@ -7,12 +7,24 @@ import { CONTENTS_INIT } from "@/lib/mock-data";
 import { iStyle, selectStyle, optionStyle, btnPrimary, btnGhost, btnDanger } from "@/lib/styles";
 import { weekMondayUtcIso } from "@/lib/week-utils";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
+import { useGuildIdSelection } from "@/lib/use-guild-id-selection";
+import { useSyncedContentSelection } from "@/lib/use-synced-content";
 
 export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresData, contents, setContents }) {
-  const { refreshScores, refreshContribs } = useGuildInsight();
-  const [guildId, setGuildId] = useState(guilds[0]?.id);
-  const [content, setContent] = useState(contents[0] || CONTENTS_INIT[0]);
+  const {
+    refreshScores,
+    refreshContribs,
+    activeGuild,
+    setActiveGuild,
+    registerContentRename,
+    appendContent,
+    removeContent,
+  } = useGuildInsight();
+  const [content, setContent] = useSyncedContentSelection(contents);
   const [selected, setSelected] = useState(null);
+  const [guildId, setGuildId] = useGuildIdSelection(activeGuild, guilds, {
+    onActiveGuildSync: () => setSelected(null),
+  });
   const [histModal, setHistModal] = useState(null);
   const [addModal, setAddModal] = useState(false);
   const [newContent, setNewContent] = useState("");
@@ -25,9 +37,14 @@ export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresD
   const [histRows, setHistRows] = useState([]);
   const [histLoading, setHistLoading] = useState(false);
 
-  useEffect(() => {
-    if (guilds?.length > 0 && !guildId) setGuildId(guilds[0].id);
-  }, [guilds, guildId]);
+  const handleGuildSelectChange = (nextId) => {
+    setGuildId(nextId);
+    setSelected(null);
+    const g = guilds.find((x) => Number(x.id) === Number(nextId));
+    if (g && Number(activeGuild?.id) !== Number(g.id)) {
+      setActiveGuild(g);
+    }
+  };
 
   useEffect(() => {
     if (guilds.length > 0) refreshScores();
@@ -101,8 +118,10 @@ export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresD
   };
 
   const addContent = () => {
-    if (!newContent.trim()) return;
-    setContents((p) => [...p, newContent.trim()]);
+    const name = newContent.trim();
+    if (!name) return;
+    appendContent(name);
+    setContent(name);
     setNewContent("");
     setAddModal(false);
   };
@@ -112,8 +131,11 @@ export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresD
       setDelContentAlert(true);
       return;
     }
-    setContents((p) => p.filter((x) => x !== c));
-    if (content === c) setContent(contents.find((x) => x !== c) || CONTENTS_INIT[0]);
+    removeContent(c);
+    if (content === c) {
+      const next = contents.filter((x) => x !== c);
+      setContent(next[0] || CONTENTS_INIT[0]);
+    }
     setScoresData((p) => {
       const key = String(guildId);
       const gData = { ...(p[key] || p[guildId] || {}) };
@@ -128,6 +150,7 @@ export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresD
       setRenameModal(false);
       return;
     }
+    registerContentRename(content, newName);
     setContents((p) => p.map((c) => (c === content ? newName : c)));
     setScoresData((p) => {
       const key = String(guildId);
@@ -149,10 +172,7 @@ export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresD
         <div style={{ padding: "12px 18px", borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: t.navBg }}>
           <select
             value={guildId}
-            onChange={(e) => {
-              setGuildId(+e.target.value);
-              setSelected(null);
-            }}
+            onChange={(e) => handleGuildSelectChange(+e.target.value)}
             style={{ ...selectStyle(t), width: "auto", minWidth: 140 }}
           >
             {guilds.map((g) => (
@@ -413,7 +433,7 @@ export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresD
           <div style={{ fontSize: 11, color: t.textSub, marginBottom: 10, lineHeight: 1.6 }}>
             게임에 맞게 컨텐츠 이름을 변경할 수 있습니다.
             <br />
-            <span style={{ color: t.accent, fontSize: 10 }}>예) 총력전 → 레이드, 결투장 → 아레나</span>
+            <span style={{ color: t.accent, fontSize: 10 }}>예) 주간 활약 → 레이드, 결투장 → 아레나</span>
           </div>
           <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 5 }}>새 컨텐츠명</div>
           <input
@@ -468,7 +488,7 @@ export function ScoreManagement({ t, guilds, membersData, scoresData, setScoresD
 
       <Modal open={delContentAlert} onClose={() => setDelContentAlert(false)} t={t} title="삭제 불가">
         <div style={{ fontSize: 12, color: t.textSub, marginBottom: 16 }}>
-          기본 제공 컨텐츠(총력전, 결투장 등)는 삭제할 수 없습니다. 직접 추가한 컨텐츠만 삭제 가능합니다.
+          기본 제공 컨텐츠(주간 활약, 결투장 등)는 삭제할 수 없습니다. 직접 추가한 컨텐츠만 삭제 가능합니다.
         </div>
         <button onClick={() => setDelContentAlert(false)} style={btnPrimary(t)}>
           확인

@@ -11,6 +11,7 @@ import { memberForUi } from "@/lib/guild-display";
 import { buildMemberRadar, hasRadarData } from "@/lib/radar-utils";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
 import { hasMemberLeft } from "@/lib/member-status";
+import { useGuildIdSelection } from "@/lib/use-guild-id-selection";
 
 const MEMBER_STATUS_FILTERS = [
   { id: "all", label: "전체 보기" },
@@ -27,20 +28,27 @@ export function MemberManagement({
   scoresData = {},
   contents = [],
 }) {
-  const { refreshGuilds } = useGuildInsight();
+  const { refreshGuilds, activeGuild, setActiveGuild } = useGuildInsight();
 
-  const [guildId, setGuildId] = useState(guilds[0]?.id);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
+  const [guildId, setGuildId] = useGuildIdSelection(activeGuild, guilds, {
+    onActiveGuildSync: () => setSelected(null),
+  });
   const [modal, setModal] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [delConfirm, setDelConfirm] = useState(null);
   const [form, setForm] = useState({ nick: "", server: "", job: "", joined: "", left: "" });
 
-  useEffect(() => {
-    if (!guildId && guilds.length > 0) setGuildId(guilds[0].id);
-  }, [guilds, guildId]);
+  const handleGuildSelectChange = (nextId) => {
+    setGuildId(nextId);
+    setSelected(null);
+    const g = guilds.find((x) => Number(x.id) === Number(nextId));
+    if (g && Number(activeGuild?.id) !== Number(g.id)) {
+      setActiveGuild(g);
+    }
+  };
 
   const currentMembers = membersData[String(guildId)] || membersData[guildId] || [];
 
@@ -163,10 +171,7 @@ export function MemberManagement({
           </div>
           <select
             value={guildId}
-            onChange={(e) => {
-              setGuildId(+e.target.value);
-              setSelected(null);
-            }}
+            onChange={(e) => handleGuildSelectChange(+e.target.value)}
             style={{ ...selectStyle(t), width: "100%", marginBottom: 8 }}
           >
             {guilds.map((g) => (

@@ -4,6 +4,13 @@ import { createContext, useContext, useState, useMemo, useCallback, useEffect, u
 import { useRouter } from "next/navigation";
 import { THEMES } from "@/lib/theme";
 import { CONTENTS_INIT } from "@/lib/mock-data";
+import {
+  mergeContentLists,
+  persistContents,
+  readStoredContents,
+  extractContentNamesFromScoresData,
+  extractContentNamesFromScoreRows,
+} from "@/lib/contents-catalog";
 import { ROUTES } from "@/lib/navigation";
 import {
   groupMembersByGuildId,
@@ -83,8 +90,86 @@ export function GuildInsightProvider({
   const [contribsData, setContribsData] = useState({});
   const [contribsLoading, setContribsLoading] = useState(true);
   const [activeGuild, setActiveGuild] = useState(null);
-  const [contents, setContents] = useState(CONTENTS_INIT);
+  const [contents, setContents] = useState(() => [...CONTENTS_INIT]);
+  const contentsHydratedRef = useRef(false);
+  /** rename 시 DB에 남은 이전 content_name → 현재 탭 이름으로 조회 */
+  const [contentAliases, setContentAliases] = useState({});
   const [ocrSession, setOcrSession] = useState(null);
+
+  /** 세션에 저장된 사용자 추가 컨텐츠 복원 (SSR 이후 1회) */
+  useEffect(() => {
+    if (contentsHydratedRef.current) return;
+    contentsHydratedRef.current = true;
+    const stored = readStoredContents();
+    if (stored?.length) {
+      setContents((prev) => mergeContentLists(prev, stored));
+    }
+  }, []);
+
+  useEffect(() => {
+    persistContents(contents);
+  }, [contents]);
+
+  const mergeContentsIntoState = useCallback((extraNames) => {
+    if (!extraNames?.length) return;
+    setContents((prev) => {
+      const merged = mergeContentLists(prev, extraNames);
+      if (
+        merged.length === prev.length &&
+        merged.every((name, i) => name === prev[i])
+      ) {
+        return prev;
+      }
+      return merged;
+    });
+  }, []);
+
+  /** 신규 컨텐츠 등록 — 배열 끝에 추가, 전 메뉴 탭/드롭다운에 즉시 반영 */
+  const appendContent = useCallback((name) => {
+    const n = String(name || "").trim();
+    if (!n) return false;
+    let added = false;
+    setContents((prev) => {
+      if (prev.includes(n)) return prev;
+      added = true;
+      return [...prev, n];
+    });
+    return added;
+  }, []);
+
+  const removeContent = useCallback((name) => {
+    const n = String(name || "").trim();
+    if (!n) return;
+    setContents((prev) => prev.filter((c) => c !== n));
+  }, []);
+
+  const registerContentRename = useCallback((oldName, newName) => {
+    const o = String(oldName || "").trim();
+    const n = String(newName || "").trim();
+    if (!o || !n || o === n) return;
+    setContentAliases((prev) => {
+      const chain = new Set([o, ...(prev[o] || []), ...(prev[n] || [])]);
+      const next = { ...prev };
+      delete next[o];
+      next[n] = [...chain];
+      return next;
+    });
+  }, []);
+
+  const resolveContentDbNames = useCallback(
+    (name) => {
+      const n = String(name || "").trim();
+      if (!n) {
+        const first = contents?.[0];
+        return first ? [first] : [];
+      }
+      const aliases = contentAliases[n] || [];
+      return [...new Set([n, ...aliases])];
+    },
+    [contents, contentAliases]
+  );
+
+  const primaryContent = contents?.[0] ?? CONTENTS_INIT[0] ?? "";
 
   const [user] = useState(initialUser);
 
@@ -158,14 +243,19 @@ export function GuildInsightProvider({
       const response = await fetch("/api/scores");
       if (!response.ok) throw new Error("점수 조회 실패");
       const data = await response.json();
-      setScoresData(formatScoresFromApi(data));
+      const formatted = formatScoresFromApi(data);
+      setScoresData(formatted);
+      mergeContentsIntoState([
+        ...extractContentNamesFromScoresData(formatted),
+        ...extractContentNamesFromScoreRows(data),
+      ]);
     } catch (error) {
       console.error("점수 데이터 로드 실패:", error);
       setScoresData({});
     } finally {
       setScoresLoading(false);
     }
-  }, []);
+  }, [mergeContentsIntoState]);
 
   const refreshContribs = useCallback(async () => {
     setContribsLoading(true);
@@ -370,6 +460,13 @@ export function GuildInsightProvider({
       setActiveGuild,
       contents,
       setContents,
+      appendContent,
+      removeContent,
+      mergeContentsIntoState,
+      primaryContent,
+      contentAliases,
+      registerContentRename,
+      resolveContentDbNames,
       ocrSession,
       setOcrSession,
       addGuild,
@@ -399,6 +496,12 @@ export function GuildInsightProvider({
       refreshContribs,
       activeGuild,
       contents,
+      appendContent,
+      removeContent,
+      primaryContent,
+      contentAliases,
+      registerContentRename,
+      resolveContentDbNames,
       ocrSession,
       addGuild,
       selectGuild,

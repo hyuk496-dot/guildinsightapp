@@ -4,14 +4,15 @@ import Image from "next/image";
 import { useRef, useState, useEffect } from "react";
 import { Tag } from "@/components/shared/Tag";
 import { selectStyle, optionStyle } from "@/lib/styles";
-import { CONTENTS_INIT } from "@/lib/mock-data";
 import { exportElementToPdf } from "@/lib/export-report-pdf";
 import { useToast } from "@/components/shared/Toast";
 import { ADMIN_EMAIL } from "@/lib/ocr-quota";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
+import { buildContentFilterOptions } from "@/lib/contents-catalog";
 
 export function GPTReport({ t, guilds = [], activeGuild }) {
-  const { user, membersData } = useGuildInsight();
+  const { user, membersData, contents, primaryContent, resolveContentDbNames } =
+    useGuildInsight();
   const { showToast } = useToast();
   const [guildId, setGuildId] = useState(activeGuild?.id ?? guilds[0]?.id);
   const [rptContent, setRptContent] = useState("전체");
@@ -164,7 +165,7 @@ export function GPTReport({ t, guilds = [], activeGuild }) {
         ? report.content_filter
         : null) ||
       (rptContent && rptContent !== "전체" ? rptContent : null) ||
-      "공성전";
+      primaryContent || contents?.[0] || "전체";
 
     // [로컬 데모 Q&A] 어떤 질문이든 1순위로 서버에 위임:
     // question 전체를 전달 → 서버에서 (이름/날짜/컨텐츠) 조건 분기 + 단건 조회 + 답변 조립
@@ -174,6 +175,10 @@ export function GPTReport({ t, guilds = [], activeGuild }) {
           typeof gid === "object" && gid !== null ? gid?.id || gid?.value : gid;
         console.log("[디버그] 백엔드로 전송할 실제 guildId 문자열:", actualGuildId);
 
+        const lookupContent =
+          contentFilter && contentFilter !== "전체"
+            ? contentFilter
+            : primaryContent || contents?.[0] || "";
         const res = await fetch("/api/gpt/member-score", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -181,6 +186,8 @@ export function GPTReport({ t, guilds = [], activeGuild }) {
             guildId: actualGuildId,
             question,
             contentFilter,
+            contents: (contents || []).filter((c) => c && c !== "전체"),
+            contentDbNames: resolveContentDbNames(lookupContent),
           }),
         });
         // HTTP 통신 자체가 성공했는지 먼저 확인
@@ -210,7 +217,7 @@ export function GPTReport({ t, guilds = [], activeGuild }) {
     return !!isAdmin && !isLocal;
   };
 
-  const contentOptions = ["전체", ...CONTENTS_INIT];
+  const contentOptions = buildContentFilterOptions(contents);
 
   useEffect(() => {
     if (activeGuild?.id) setGuildId(activeGuild.id);
@@ -873,7 +880,7 @@ NOTIFY pgrst, 'reload schema';`;
                     const content =
                       selected.content_filter && selected.content_filter !== "전체"
                         ? selected.content_filter
-                        : "총력전";
+                        : primaryContent || contents?.[0] || "전체";
                     const gid = selected.guild_id ?? guildId;
                     const res = await fetch("/api/discord/share-weekly-report", {
                       method: "POST",

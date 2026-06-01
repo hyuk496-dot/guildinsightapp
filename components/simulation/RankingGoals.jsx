@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useEffect, useMemo } from "react";
-import { CONTENTS_INIT } from "@/lib/mock-data";
 import { selectStyle, optionStyle } from "@/lib/styles";
+import { useGuildInsight } from "@/context/GuildInsightProvider";
+import { useSyncedContentSelection } from "@/lib/use-synced-content";
+import { buildContentQueryString } from "@/lib/content-fetch";
+import { listContentTabs } from "@/lib/contents-catalog";
 import { formatWeekDisplay } from "@/lib/week-utils";
 import { MAX_BOOST, simulateGuildRank } from "@/lib/ranking-goals";
 import {
@@ -21,11 +24,47 @@ function formatNum(n) {
   return Number(n || 0).toLocaleString();
 }
 
+/** 순위 시뮬레이션 점수 인라인: 파란 총점 · [ 흰색 굵은 시나리오 ] · +초록 가산 */
+function SimScoreInline({ total, scenarioBonus, guildBoost, t, fontSize = 11 }) {
+  const mono = { fontFamily: "'Courier New',monospace", fontSize };
+  const hasParts = scenarioBonus > 0 || guildBoost > 0;
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        flexWrap: "wrap",
+        alignItems: "baseline",
+        justifyContent: "center",
+        gap: "0 6px",
+        lineHeight: 1.35,
+        ...mono,
+      }}
+    >
+      <span style={{ ...mono, color: t.accent, fontWeight: 600 }}>{formatNum(total)}</span>
+      {scenarioBonus > 0 ? (
+        <span style={{ ...mono, color: "#fff", fontWeight: 700 }}>
+          [ {formatNum(scenarioBonus)} ]
+        </span>
+      ) : null}
+      {guildBoost > 0 ? (
+        <span style={{ ...mono, color: t.up, fontWeight: 500 }}>+{formatNum(guildBoost)}</span>
+      ) : null}
+      {!hasParts ? (
+        <span style={{ ...mono, color: t.textMuted, fontWeight: 400, fontSize: fontSize - 1 }}>
+          가산 없음
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 const BOOST_STEP = 100_000; // 10만 단위 정밀 조절
 
 export function RankingGoals({ t, guilds, activeGuild }) {
+  const { contents, resolveContentDbNames } = useGuildInsight();
   const [guildId, setGuildId] = useState(activeGuild?.id ?? guilds[0]?.id);
-  const [content, setContent] = useState(CONTENTS_INIT[0]);
+  const [content, setContent] = useSyncedContentSelection(contents);
+  const contentTabs = listContentTabs(contents);
   const [boost, setBoost] = useState(0);
   const [boostInput, setBoostInput] = useState("0");
   const [data, setData] = useState(null);
@@ -45,9 +84,8 @@ export function RankingGoals({ t, guilds, activeGuild }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(
-      `/api/simulation?guild_id=${guildId}&content=${encodeURIComponent(content)}`
-    )
+    const contentQs = buildContentQueryString(content, resolveContentDbNames);
+    fetch(`/api/simulation?guild_id=${guildId}&${contentQs}`)
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -73,7 +111,7 @@ export function RankingGoals({ t, guilds, activeGuild }) {
     return () => {
       cancelled = true;
     };
-  }, [guildId, content]);
+  }, [guildId, content, resolveContentDbNames]);
 
   useEffect(() => {
     if (!guildId || !weekKey) {
@@ -106,6 +144,18 @@ export function RankingGoals({ t, guilds, activeGuild }) {
     ? data?.scenarios?.[activePreset]?.totalScore ?? ourBase
     : ourBase;
   const simulatedTotal = baseForSim + boost;
+
+  /** 시나리오 원클릭 가산 vs 슬라이더 가산 (표시·순위표 분리용, API/차트 미변경) */
+  const scenarioBonus = useMemo(() => {
+    if (!activePreset || !data?.scenarios) return 0;
+    const sc = data.scenarios[activePreset];
+    const added = Number(sc?.addedPoints);
+    if (Number.isFinite(added) && added >= 0) return added;
+    return Math.max(0, baseForSim - ourBase);
+  }, [activePreset, data?.scenarios, baseForSim, ourBase]);
+
+  const guildBoost = boost;
+  const finalExpectedTotal = ourBase + scenarioBonus + guildBoost;
 
   const sim = useMemo(
     () => simulateGuildRank(ranks, simulatedTotal),
@@ -307,7 +357,7 @@ export function RankingGoals({ t, guilds, activeGuild }) {
       </div>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-        {CONTENTS_INIT.map((c) => (
+        {contentTabs.map((c) => (
           <button
             key={c}
             type="button"
@@ -604,8 +654,31 @@ export function RankingGoals({ t, guilds, activeGuild }) {
                 <div style={{ fontSize: 22, fontWeight: 500, color: t.accent }}>
                   {sim.rank ? `#${sim.rank}` : "—"}
                 </div>
-                <div style={{ fontSize: 9, color: t.accent, marginTop: 4 }}>
-                  {formatNum(simulatedTotal)}점
+                <div
+                  style={{
+                    marginTop: 8,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 9,
+                      color: t.accentDim,
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    최종 예상 총점
+                  </div>
+                  <SimScoreInline
+                    total={finalExpectedTotal}
+                    scenarioBonus={scenarioBonus}
+                    guildBoost={guildBoost}
+                    t={t}
+                    fontSize={12}
+                  />
                 </div>
               </div>
               <div style={{ background: t.upBg, borderRadius: 8, padding: "12px", textAlign: "center" }}>
@@ -660,12 +733,19 @@ export function RankingGoals({ t, guilds, activeGuild }) {
                     {r.name}
                     {r.ours ? " ★" : ""}
                   </span>
-                  <span style={{ fontSize: 11, fontWeight: 500, color: r.ours ? t.accent : t.text }}>
-                    {formatNum(r.simScore)}
-                  </span>
-                  {r.ours && r.simScore !== r.displayScore && (
-                    <span style={{ fontSize: 9, color: t.up }}>
-                      +{formatNum(r.simScore - r.displayScore)}
+                  {r.ours ? (
+                    <span style={{ flexShrink: 0, textAlign: "right" }}>
+                      <SimScoreInline
+                        total={r.simScore}
+                        scenarioBonus={scenarioBonus}
+                        guildBoost={guildBoost}
+                        t={t}
+                        fontSize={10}
+                      />
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, fontWeight: 500, color: t.text }}>
+                      {formatNum(r.simScore)}
                     </span>
                   )}
                 </div>

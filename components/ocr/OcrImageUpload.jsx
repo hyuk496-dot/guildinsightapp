@@ -11,6 +11,7 @@ import {
   excelRowsToOcrFormat,
   SKIP_VALUE,
 } from "@/lib/excel-import";
+import { listContentTabs } from "@/lib/contents-catalog";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -43,10 +44,20 @@ export function OcrImageUpload({
   const [excelMapping, setExcelMapping] = useState({});
   const fileRef = useRef(null);
 
+  const contentTabs = listContentTabs(contents);
   const [guildId, setGuildId] = useState(defaultGuildId ?? guilds[0]?.id ?? "");
   const [contentName, setContentName] = useState(
-    defaultContentName ?? contents[0] ?? "총력전"
+    defaultContentName ?? contentTabs[0] ?? ""
   );
+
+  useEffect(() => {
+    if (contentName && contentTabs.includes(contentName)) return;
+    if (defaultContentName && contentTabs.includes(defaultContentName)) {
+      setContentName(defaultContentName);
+      return;
+    }
+    if (contentTabs[0]) setContentName(contentTabs[0]);
+  }, [contentTabs, defaultContentName]);
   const [ocrQuota, setOcrQuota] = useState({
     remaining: 0,
     max: FREE_OCR_MAX,
@@ -417,12 +428,12 @@ export function OcrImageUpload({
                   onChange={(e) => setContentName(e.target.value)}
                   style={{ ...selectStyle(t), width: "100%", padding: "7px 10px", fontSize: 12 }}
                 >
-                  {contents.length === 0 && (
+                  {contentTabs.length === 0 && (
                     <option value="" style={optionStyle(t)}>
                       컨텐츠 없음
                     </option>
                   )}
-                  {contents.map((c) => (
+                  {contentTabs.map((c) => (
                     <option key={c} value={c} style={optionStyle(t)}>
                       {c}
                     </option>

@@ -10,7 +10,6 @@ import {
   formatWeekDisplay,
   weekMondayKeyFromTimestamp,
 } from "@/lib/week-utils";
-import { CONTENTS_INIT } from "@/lib/mock-data";
 
 /** GPTReport LIVE Q&A 프리미엄 안내와 동일 문구 */
 const PREMIUM_UPSELL =
@@ -203,21 +202,24 @@ function resolveTargetWeekFromQuestion(question) {
   };
 }
 
-function extractContentFromQuestion(question) {
+function extractContentFromQuestion(question, contentsList = []) {
   const q = stripSpacesLower(question);
-  const contents = (CONTENTS_INIT || []).filter((c) => c && c !== "전체");
-  for (const c of contents) {
+  const list = (contentsList || []).filter((c) => c && c !== "전체");
+  const sorted = [...list].sort((a, b) => b.length - a.length);
+  for (const c of sorted) {
     if (q.includes(stripSpacesLower(c))) return c;
   }
   return null;
 }
 
-function pickContent({ question, contentFilter }) {
-  const mentioned = extractContentFromQuestion(question);
+function pickContent({ question, contentFilter, contentsList = [] }) {
+  const mentioned = extractContentFromQuestion(question, contentsList);
   if (mentioned) return { content: mentioned, source: "QUESTION" };
   if (contentFilter && contentFilter !== "전체")
     return { content: contentFilter, source: "FILTER" };
-  return { content: "총력전", source: "DEFAULT" };
+  const primary = contentsList?.[0];
+  if (primary) return { content: primary, source: "DEFAULT" };
+  return { content: "", source: "DEFAULT" };
 }
 
 function detectMemberFromQuestion(members, question) {
@@ -290,18 +292,28 @@ async function sumMemberScoreForWeek({
   guildId,
   memberId,
   content,
+  contentNames = null,
   weekMonday,
   includeGuildFilter = true,
   strictWeekQuery = false,
 }) {
+  const names = (
+    Array.isArray(contentNames) && contentNames.length
+      ? contentNames
+      : content
+        ? [String(content)]
+        : []
+  ).map((n) => String(n).trim()).filter(Boolean);
+
   // 1) week_monday 컬럼이 있는 경우(정상)
   let q = supabase
     .from("scores")
     // ⚠️ 일부 데모/레거시 스키마에는 created_at/updated_at 컬럼이 없을 수 있어 제외한다.
     .select("score, week_monday")
     .eq("member_id", Number(memberId))
-    .eq("content_name", content)
     .eq("week_monday", weekMonday);
+  if (names.length === 1) q = q.eq("content_name", names[0]);
+  else if (names.length > 1) q = q.in("content_name", names);
   if (includeGuildFilter) q = q.eq("guild_id", Number(guildId));
 
   const res = await q;
@@ -333,8 +345,9 @@ async function sumMemberScoreForWeek({
     .from("scores")
     .select("score")
     .eq("member_id", Number(memberId))
-    .eq("content_name", content)
     .limit(30);
+  if (names.length === 1) legacyQuery = legacyQuery.eq("content_name", names[0]);
+  else if (names.length > 1) legacyQuery = legacyQuery.in("content_name", names);
   if (includeGuildFilter) legacyQuery = legacyQuery.eq("guild_id", Number(guildId));
 
   const legacy = await legacyQuery;
@@ -361,6 +374,12 @@ export async function POST(request) {
         : null;
     const question = clampStr(body?.question || "", 400);
     const contentFilter = clampStr(body?.contentFilter || "전체", 40) || "전체";
+    const contentsList = (Array.isArray(body?.contents) ? body.contents : [])
+      .map((c) => String(c || "").trim())
+      .filter((c) => c && c !== "전체");
+    const contentDbNames = (Array.isArray(body?.contentDbNames) ? body.contentDbNames : [])
+      .map((c) => String(c || "").trim())
+      .filter(Boolean);
 
     if (!targetGuildId || !Number.isFinite(targetGuildId)) {
       return NextResponse.json({ error: "guildId 필요" }, { status: 400 });
@@ -491,7 +510,7 @@ export async function POST(request) {
     const totalScore = emptyWeek ? 0 : rawTotal;
     const weekLabel = formatWeekDisplay(targetWeek);
 
-    const mentionedContent = extractContentFromQuestion(question);
+    const mentionedContent = extractContentFromQuestion(question, contentsList);
     const stage =
       hasDate && mentionedContent && mentionedContent !== contentFilter
         ? 3

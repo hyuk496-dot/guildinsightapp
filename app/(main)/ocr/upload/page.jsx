@@ -12,7 +12,7 @@ export default function OcrUploadEntryPage() {
       guilds={guilds}
       contents={contents}
       defaultGuildId={activeGuild?.id ?? null}
-      defaultContentName={contents?.[0] ?? "총력전"}
+      defaultContentName={contents?.[0] ?? ""}
       onScanComplete={(meta) => completeOcrScan(meta)}
     />
   );

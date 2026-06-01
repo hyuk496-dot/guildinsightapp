@@ -4,17 +4,25 @@ import { Modal } from "@/components/shared/Modal";
 import { ContribRow } from "./ContribRow";
 import { selectStyle, optionStyle, btnGhost, btnDanger } from "@/lib/styles";
 import { useGuildInsight } from "@/context/GuildInsightProvider";
+import { useGuildIdSelection } from "@/lib/use-guild-id-selection";
 
 export function ContribAnalysis({ t, guilds, contribsData, setContribsData }) {
-  const { refreshContribs } = useGuildInsight();
-  const [guildId, setGuildId] = useState(guilds[0]?.id);
+  const { refreshContribs, activeGuild, setActiveGuild } = useGuildInsight();
   const [selected, setSelected] = useState(null);
+  const [guildId, setGuildId] = useGuildIdSelection(activeGuild, guilds, {
+    onActiveGuildSync: () => setSelected(null),
+  });
   const [histModal, setHistModal] = useState(null);
   const [delConfirm, setDelConfirm] = useState(null);
 
-  useEffect(() => {
-    if (!guildId && guilds.length > 0) setGuildId(guilds[0].id);
-  }, [guilds, guildId]);
+  const handleGuildSelectChange = (nextId) => {
+    setGuildId(nextId);
+    setSelected(null);
+    const g = guilds.find((x) => Number(x.id) === Number(nextId));
+    if (g && Number(activeGuild?.id) !== Number(g.id)) {
+      setActiveGuild(g);
+    }
+  };
 
   const contribs = contribsData[guildId] || contribsData[String(guildId)] || [];
   const total = contribs.reduce((a, c) => a + c.score, 0);
@@ -80,10 +88,7 @@ export function ContribAnalysis({ t, guilds, contribsData, setContribsData }) {
         <div style={{padding:"12px 18px",borderBottom:`1px solid ${t.border}`,display:"flex",alignItems:"center",gap:12,background:t.navBg}}>
           <select
             value={guildId}
-            onChange={(e) => {
-              setGuildId(+e.target.value);
-              setSelected(null);
-            }}
+            onChange={(e) => handleGuildSelectChange(+e.target.value)}
             style={{ ...selectStyle(t), width: "auto", minWidth: 140 }}
           >
             {guilds.map((g) => (

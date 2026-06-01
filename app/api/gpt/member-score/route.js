@@ -12,6 +12,13 @@ import {
 } from "@/lib/week-utils";
 import { CONTENTS_INIT } from "@/lib/mock-data";
 
+/** GPTReport LIVE Q&A 프리미엄 안내와 동일 문구 */
+const PREMIUM_UPSELL =
+  "자유로운 AI 질의응답 및 상세 전략 추천은 Premium 요금제에서 제공됩니다. 🚀";
+
+/** 무료 조회 가능: 이번 주(0) ~ 3주 전까지. 4주 전 이상은 Premium */
+const FREE_WEEK_LOOKBACK_MAX = 3;
+
 function clampStr(v, max = 400) {
   const s = String(v ?? "").trim();
   if (s.length <= max) return s;
@@ -58,32 +65,142 @@ function getMemberNameFromRow(row) {
 
 function extractDateFromQuestion(question) {
   const q = String(question || "");
-  const year = new Date().getFullYear();
+  const defaultYear = new Date().getFullYear();
 
-  // 05.25 / 5.25 / 05/25
-  const m1 = q.match(/(?:^|[^\d])(\d{1,2})[./](\d{1,2})(?:$|[^\d])/);
-  if (m1) {
-    const mm = Number(m1[1]);
-    const dd = Number(m1[2]);
+  // 2026-05-12 / 2026.05.12 / 2026/05/12
+  const mIso = q.match(
+    /(?:^|[^\d])(20\d{2})[-./](\d{1,2})[-./](\d{1,2})(?:$|[^\d])/
+  );
+  if (mIso) {
+    const y = Number(mIso[1]);
+    const mm = Number(mIso[2]);
+    const dd = Number(mIso[3]);
     if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      const d = new Date(year, mm - 1, dd);
-      if (!Number.isNaN(d.getTime())) return { date: d, label: `${mm}.${dd}` };
+      const d = new Date(y, mm - 1, dd);
+      if (!Number.isNaN(d.getTime())) {
+        return { date: d, label: `${y}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}` };
+      }
     }
   }
 
   // 5월 25일 / 05월25일
-  const m2 = q.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-  if (m2) {
-    const mm = Number(m2[1]);
-    const dd = Number(m2[2]);
+  const mKorean = q.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (mKorean) {
+    const mm = Number(mKorean[1]);
+    const dd = Number(mKorean[2]);
     if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      const d = new Date(year, mm - 1, dd);
-      if (!Number.isNaN(d.getTime()))
+      const d = new Date(defaultYear, mm - 1, dd);
+      if (!Number.isNaN(d.getTime())) {
         return { date: d, label: `${mm}월 ${dd}일` };
+      }
+    }
+  }
+
+  // 05.25 / 5.25 / 05/25 (연도 생략 — 올해 기준)
+  const mShort = q.match(/(?:^|[^\d])(\d{1,2})[./](\d{1,2})(?:$|[^\d])/);
+  if (mShort) {
+    const mm = Number(mShort[1]);
+    const dd = Number(mShort[2]);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const d = new Date(defaultYear, mm - 1, dd);
+      if (!Number.isNaN(d.getTime())) {
+        return { date: d, label: `${mm}월 ${dd}일` };
+      }
     }
   }
 
   return null;
+}
+
+function shiftWeekMondayFromCurrent(weeksBack) {
+  const current = recentWeekMondays(1)?.[0] || weekMondayKey();
+  const d = new Date(`${current}T12:00:00`);
+  d.setDate(d.getDate() - weeksBack * 7);
+  return weekMondayKey(d);
+}
+
+/** targetWeek(월요일)가 이번 주 월요일보다 몇 주 이전인지 (0=이번 주) */
+function weeksAgoFromCurrentWeek(targetWeek) {
+  const current = recentWeekMondays(1)?.[0] || weekMondayKey();
+  const t = new Date(`${targetWeek}T12:00:00`).getTime();
+  const c = new Date(`${current}T12:00:00`).getTime();
+  const diffDays = Math.round((c - t) / (24 * 60 * 60 * 1000));
+  return Math.max(0, Math.round(diffDays / 7));
+}
+
+function weekWordForOffset(weeksBack) {
+  if (weeksBack <= 0) return "이번 주";
+  if (weeksBack === 1) return "지난주";
+  if (weeksBack === 2) return "지지난주";
+  if (weeksBack === 3) return "지지지난주";
+  return `${weeksBack}주 전`;
+}
+
+/** 질문에서 주차 오프셋 파싱 (null = 키워드 없음) */
+function parseWeekOffsetFromQuestion(question) {
+  const q = String(question || "");
+  const compact = stripSpacesLower(q);
+
+  // 긴 키워드 우선 (4주 → 3주 → …)
+  if (/지지지지난주/.test(compact) || /4주전/.test(compact)) return 4;
+  if (/지지지난주/.test(compact) || /3주전/.test(compact)) return 3;
+  if (/지지난주/.test(compact) || /2주전/.test(compact)) return 2;
+  if (/지난주|전주|저번주/.test(compact) || /1주전/.test(compact)) return 1;
+  if (/이번주|이번 주|금주/.test(compact)) return 0;
+
+  const nMatch = q.match(/(\d+)\s*주\s*전/);
+  if (nMatch) {
+    const n = Number(nMatch[1]);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+
+  return null;
+}
+
+/**
+ * targetWeek·프리미엄 여부·표시 라벨 결정
+ * @returns {{ kind: 'premium' } | { kind: 'resolved', targetWeek: string, weeksAgo: number, hasDate: boolean, dateLabel?: string, weekWord: string }}
+ */
+function resolveTargetWeekFromQuestion(question) {
+  const dateHit = extractDateFromQuestion(question);
+  const weekKeywordOffset = parseWeekOffsetFromQuestion(question);
+
+  if (dateHit?.date) {
+    const targetWeek = weekMondayKey(dateHit.date);
+    const weeksAgo = weeksAgoFromCurrentWeek(targetWeek);
+    if (weeksAgo > FREE_WEEK_LOOKBACK_MAX) {
+      return { kind: "premium" };
+    }
+    return {
+      kind: "resolved",
+      targetWeek,
+      weeksAgo,
+      hasDate: true,
+      dateLabel: dateHit.label,
+      weekWord: weekWordForOffset(weeksAgo),
+    };
+  }
+
+  if (weekKeywordOffset !== null) {
+    if (weekKeywordOffset > FREE_WEEK_LOOKBACK_MAX) {
+      return { kind: "premium" };
+    }
+    return {
+      kind: "resolved",
+      targetWeek: shiftWeekMondayFromCurrent(weekKeywordOffset),
+      weeksAgo: weekKeywordOffset,
+      hasDate: false,
+      weekWord: weekWordForOffset(weekKeywordOffset),
+    };
+  }
+
+  return {
+    kind: "resolved",
+    targetWeek: recentWeekMondays(1)?.[0] || weekMondayKey(),
+    weeksAgo: 0,
+    hasDate: false,
+    weekWord: "이번 주",
+  };
 }
 
 function extractContentFromQuestion(question) {
@@ -175,7 +292,7 @@ async function sumMemberScoreForWeek({
   content,
   weekMonday,
   includeGuildFilter = true,
-  lastWeekQuery = false,
+  strictWeekQuery = false,
 }) {
   // 1) week_monday 컬럼이 있는 경우(정상)
   let q = supabase
@@ -192,9 +309,9 @@ async function sumMemberScoreForWeek({
   if (!res.error) {
     const rows = Array.isArray(res.data) ? res.data : [];
     const total = rows.reduce((s, r) => s + Number(r.score || 0), 0);
-    // 지난주로 조회했는데 해당 주차 row가 없으면 레거시 limit(30)으로 이번 주 점수를 끌어오지 않음
-    if (lastWeekQuery && rows.length === 0) {
-      return { total: 0, rows: [], used: "last_week_empty" };
+    // 과거 주차·특정 날짜 주차: row 없으면 레거시 limit(30)으로 이번 주 점수를 끌어오지 않음
+    if (strictWeekQuery && rows.length === 0) {
+      return { total: 0, rows: [], used: "week_empty" };
     }
     return { total, rows, used: "week_monday" };
   }
@@ -205,8 +322,8 @@ async function sumMemberScoreForWeek({
     res.error?.code === "42703" || msg.toLowerCase().includes("week_monday");
   if (!maybeMissingWeekMonday) throw res.error;
 
-  if (lastWeekQuery) {
-    return { total: 0, rows: [], used: "last_week_no_data" };
+  if (strictWeekQuery) {
+    return { total: 0, rows: [], used: "week_no_data" };
   }
 
   // week_monday 컬럼이 없으면 "주차 한정"을 DB에서 할 수 없으므로,
@@ -324,36 +441,35 @@ export async function POST(request) {
       );
     }
 
-    const dateHit = extractDateFromQuestion(question);
-    const hasDate = !!dateHit?.date;
-    let targetWeek = hasDate
-      ? weekMondayKey(dateHit.date)
-      : recentWeekMondays(1)?.[0] || weekMondayKey();
-    if (
-      !hasDate &&
-      (question.includes("지난주") ||
-        question.includes("전주") ||
-        question.includes("저번주"))
-    ) {
-      const prevMonday = new Date(`${targetWeek}T12:00:00`);
-      prevMonday.setDate(prevMonday.getDate() - 7);
-      targetWeek = weekMondayKey(prevMonday);
+    const weekResolved = resolveTargetWeekFromQuestion(question);
+
+    if (weekResolved.kind === "premium") {
+      return NextResponse.json(
+        {
+          ok: true,
+          reason: "PREMIUM_REQUIRED",
+          answer: PREMIUM_UPSELL,
+          stage: 0,
+          guildId: targetGuildId,
+          contentFilter,
+          member: { id: member.id, nick },
+        },
+        { status: 200 }
+      );
     }
 
-    const weekWord =
-      question.includes("지난주") ||
-      question.includes("전주") ||
-      question.includes("저번주")
-        ? "지난주"
-        : "이번 주";
+    const {
+      targetWeek,
+      weeksAgo,
+      hasDate,
+      dateLabel,
+      weekWord,
+    } = weekResolved;
 
     const { content, source: contentSource } = pickContent({ question, contentFilter });
 
-    const wantsLastWeek =
-      !hasDate &&
-      (question.includes("지난주") ||
-        question.includes("전주") ||
-        question.includes("저번주"));
+    // 이번 주가 아니거나 특정 날짜 주차 → 레거시 폴백 차단
+    const strictWeekQuery = weeksAgo > 0 || hasDate;
 
     const scoreRes = await sumMemberScoreForWeek({
       supabase,
@@ -362,17 +478,19 @@ export async function POST(request) {
       content,
       weekMonday: targetWeek,
       includeGuildFilter: !usedMemberFallback,
-      lastWeekQuery: wantsLastWeek,
+      strictWeekQuery,
     });
 
-    const lastWeekNoData =
-      wantsLastWeek &&
-      (scoreRes.used === "last_week_empty" || scoreRes.used === "last_week_no_data");
+    const rawTotal = Number(scoreRes.total || 0);
+    const emptyWeek =
+      strictWeekQuery &&
+      (scoreRes.used === "week_empty" ||
+        scoreRes.used === "week_no_data" ||
+        rawTotal === 0);
 
-    const totalScore = lastWeekNoData ? 0 : Number(scoreRes.total || 0);
+    const totalScore = emptyWeek ? 0 : rawTotal;
     const weekLabel = formatWeekDisplay(targetWeek);
 
-    // [단계 3] 이름 + 날짜 + 컨텐츠(질문에서 컨텐츠가 명시되고, 필터와 다르면 stage 3)
     const mentionedContent = extractContentFromQuestion(question);
     const stage =
       hasDate && mentionedContent && mentionedContent !== contentFilter
@@ -381,16 +499,20 @@ export async function POST(request) {
           ? 2
           : 1;
 
-    const prettyContent = contentFilter === "전체" && contentSource === "DEFAULT" ? content : content;
+    const prettyContent =
+      contentFilter === "전체" && contentSource === "DEFAULT" ? content : content;
 
-    const answer =
-      stage === 3
-        ? `${dateHit?.label || weekLabel} 주차 ${mentionedContent} 확인 결과, ${nick} 님의 점수는 ${totalScore.toLocaleString()}점입니다.`
+    const noDataAnswer = hasDate
+      ? `DB 확인 결과, ${dateLabel} 해당 주 ${nick} 님의 ${prettyContent} 데이터가 입력되지 않았거나 0점입니다.`
+      : `DB 확인 결과, ${weekWord} ${nick} 님의 ${prettyContent} 데이터가 입력되지 않았거나 0점입니다.`;
+
+    const answer = emptyWeek
+      ? noDataAnswer
+      : stage === 3
+        ? `${dateLabel || weekLabel} 주차 ${mentionedContent} 확인 결과, ${nick} 님의 점수는 ${totalScore.toLocaleString()}점입니다.`
         : stage === 2
-          ? `${dateHit?.label || weekLabel} 주차 확인 결과, ${nick} 님의 ${prettyContent} 점수는 ${totalScore.toLocaleString()}점입니다.`
-          : lastWeekNoData
-            ? `DB 확인 결과, ${weekWord} ${nick} 님의 ${prettyContent} 데이터가 입력되지 않았거나 0점입니다.`
-            : `DB 확인 결과, ${weekWord} ${nick} 님의 ${prettyContent} 점수는 ${totalScore.toLocaleString()}점입니다.`;
+          ? `${dateLabel || weekLabel} 주차 확인 결과, ${nick} 님의 ${prettyContent} 점수는 ${totalScore.toLocaleString()}점입니다.`
+          : `DB 확인 결과, ${weekWord} ${nick} 님의 ${prettyContent} 점수는 ${totalScore.toLocaleString()}점입니다.`;
 
     return NextResponse.json(
       {
@@ -402,9 +524,17 @@ export async function POST(request) {
         content,
         weekMonday: targetWeek,
         weekLabel,
+        weeksAgo,
         totalScore,
         answer,
-        debug: { contentSource, usedQuery: scoreRes.used, usedMemberFallback },
+        debug: {
+          contentSource,
+          usedQuery: scoreRes.used,
+          usedMemberFallback,
+          strictWeekQuery,
+          hasDate,
+          dateLabel,
+        },
       },
       { status: 200 }
     );

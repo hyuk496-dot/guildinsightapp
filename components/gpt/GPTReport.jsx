@@ -1,5 +1,6 @@
 'use client';
 import Link from "next/link";
+import Image from "next/image";
 import { useRef, useState, useEffect } from "react";
 import { Tag } from "@/components/shared/Tag";
 import { selectStyle, optionStyle } from "@/lib/styles";
@@ -29,7 +30,7 @@ export function GPTReport({ t, guilds = [], activeGuild }) {
     {
       role: "assistant",
       content:
-        "LIVE Q&A 리포트 데이터를 기반으로 질문에 답할게요. 예: '○○○ 이번주 공성전 점수 알려줘'",
+        "지난주 날짜 분기 조회도 가능합니다. (예: '지난주 ○○○ 결투장 점수 어때?')",
     },
   ]);
   const [chatInput, setChatInput] = useState("");
@@ -1017,7 +1018,7 @@ NOTIFY pgrst, 'reload schema';`;
                   >
                     <div style={{ fontSize: 9, color: t.textMuted, marginBottom: 4, letterSpacing: "0.08em" }}>
                       {m.label}
-                    </div>
+                </div>
                     <div style={{ fontSize: 14, fontWeight: 500, color: m.color || t.text }}>{m.value}</div>
                   </div>
                 ))}
@@ -1054,7 +1055,7 @@ NOTIFY pgrst, 'reload schema';`;
                   ))}
                 </div>
               )}
-            </div>
+                  </div>
 
             {Array.isArray(selected.sections) &&
               selected.sections.map((sec, i) => (
@@ -1107,7 +1108,7 @@ NOTIFY pgrst, 'reload schema';`;
               }}
             >
               <div style={{ fontSize: 11, color: t.textMuted, letterSpacing: "0.02em", marginBottom: 10 }}>
-                LIVE Q&amp;A 리포트 데이터를 기반으로 질문에 답할게요. 예: '○○○ 이번주 공성전 점수 알려줘'
+                LIVE Q&amp;A 💡 길드원 이름을 넣어 자유롭게 질문해 보세요! (리포트 데이터 기반)
               </div>
 
               <div
@@ -1120,25 +1121,56 @@ NOTIFY pgrst, 'reload schema';`;
                   paddingRight: 4,
                 }}
               >
-                {chatMessages.map((m, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                      maxWidth: "92%",
-                      padding: "9px 10px",
-                      borderRadius: 10,
-                      border: `1px solid ${m.role === "user" ? t.borderStrong : t.border}`,
-                      background: m.role === "user" ? t.accentFaint : t.bgCard,
-                      color: m.role === "user" ? t.accent : t.textSub,
-                      fontSize: 11,
-                      lineHeight: 1.7,
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    {m.content || (m.role === "assistant" && chatBusy ? "…" : "")}
-                  </div>
-                ))}
+                {chatMessages.map((m, i) => {
+                  const isUser = m.role === "user";
+                  const bubbleText =
+                    m.content || (!isUser && chatBusy ? "…" : "");
+                  const bubbleStyle = {
+                    padding: "9px 10px",
+                    borderRadius: 10,
+                    border: `1px solid ${isUser ? t.borderStrong : t.border}`,
+                    background: isUser ? t.accentFaint : t.bgCard,
+                    color: isUser ? t.accent : t.textSub,
+                    fontSize: 11,
+                    lineHeight: 1.7,
+                    whiteSpace: "pre-wrap",
+                    minWidth: 0,
+                  };
+
+                  if (isUser) {
+                    return (
+                      <div
+                        key={i}
+                        style={{ alignSelf: "flex-end", maxWidth: "92%" }}
+                      >
+                        <div style={bubbleStyle}>{bubbleText}</div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        alignSelf: "flex-start",
+                        maxWidth: "92%",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 8,
+                      }}
+                    >
+                      <Image
+                        src="/robot-profile.png"
+                        alt="AI 어시스턴트"
+                        width={36}
+                        height={36}
+                        className="rounded-full shrink-0"
+                        style={{ objectFit: "cover" }}
+                      />
+                      <div style={bubbleStyle}>{bubbleText}</div>
+                    </div>
+                  );
+                })}
               </div>
 
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
@@ -1214,7 +1246,7 @@ NOTIFY pgrst, 'reload schema';`;
                 )
               </span>
             </div>
-            </div>
+              </div>
           </>
         )}
       </div>

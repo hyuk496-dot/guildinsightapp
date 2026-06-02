@@ -1104,8 +1104,41 @@ NOTIFY pgrst, 'reload schema';`;
               </div>
             )}
 
-            {/* 대화형 Q&A (출처 문구 위) */}
             <div
+              style={{
+                marginTop: 14,
+                paddingTop: 10,
+                borderTop: `1px dashed ${t.border}`,
+                fontSize: 10,
+                color: t.textMuted,
+                lineHeight: 1.6,
+                opacity: 0.9,
+              }}
+            >
+              📄 본 리포트는 AI 기반 길드 관리 플랫폼{" "}
+              <strong style={{ color: t.accent, fontWeight: 700 }}>GUILD INSIGHT</strong>에서 생성되었습니다.{" "}
+              <span style={{ color: t.textMuted }}>
+                (출처:{" "}
+                <a
+                  href="https://guildinsightapp.vercel.app"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: t.accentDim,
+                    textDecoration: "underline dotted",
+                    textUnderlineOffset: 3,
+                  }}
+                >
+                  guildinsightapp.vercel.app
+                </a>
+                )
+              </span>
+            </div>
+            </div>
+
+            {/* PDF 캡처 제외 — 화면 전용 LIVE Q&A */}
+            <div
+              data-gi-pdf-exclude
               style={{
                 marginTop: 14,
                 padding: "12px 12px",
@@ -1222,38 +1255,6 @@ NOTIFY pgrst, 'reload schema';`;
                 </button>
               </div>
             </div>
-
-            <div
-              style={{
-                marginTop: 14,
-                paddingTop: 10,
-                borderTop: `1px dashed ${t.border}`,
-                fontSize: 10,
-                color: t.textMuted,
-                lineHeight: 1.6,
-                opacity: 0.9,
-              }}
-            >
-              📄 본 리포트는 AI 기반 길드 관리 플랫폼{" "}
-              <strong style={{ color: t.accent, fontWeight: 700 }}>GUILD INSIGHT</strong>에서 생성되었습니다.{" "}
-              <span style={{ color: t.textMuted }}>
-                (출처:{" "}
-                <a
-                  href="https://guildinsightapp.vercel.app"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    color: t.accentDim,
-                    textDecoration: "underline dotted",
-                    textUnderlineOffset: 3,
-                  }}
-                >
-                  guildinsightapp.vercel.app
-                </a>
-                )
-              </span>
-            </div>
-              </div>
           </>
         )}
       </div>

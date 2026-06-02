@@ -93,9 +93,11 @@ export async function GET(request) {
       });
     } catch (rankErr) {
       console.warn(
-        "[simulation] cross-tenant 집계 실패 — 본인 길드만 표시.",
+        "[simulation] cross-tenant 집계 실패 — 본인 길드만 표시. " +
+          "SUPABASE_SERVICE_ROLE_KEY 설정 여부를 확인하세요.",
         rankErr?.message || rankErr
       );
+      sameGameGuilds = [guildRow];
       ranking = buildServerRankings(contentScores, [guildRow], {
         contentName: content,
         gameName,
@@ -109,7 +111,8 @@ export async function GET(request) {
       myMembers || [],
       guildId,
       content,
-      ranking.ranks
+      ranking.ranks,
+      names
     );
 
     const ourEntry = ranking.ranks.find((r) => r.ours);

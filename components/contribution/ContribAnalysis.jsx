@@ -52,8 +52,9 @@ export function ContribAnalysis({ t, guilds, contribsData, setContribsData }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "저장 실패");
-      if (data.list) {
-        setContribsData((p) => ({ ...p, [guildId]: data.list, [String(guildId)]: data.list }));
+      if (Array.isArray(data.list)) {
+        const key = String(guildId);
+        setContribsData((p) => ({ ...p, [key]: data.list, [guildId]: data.list }));
       } else {
         await refreshContribs();
       }
@@ -65,16 +66,26 @@ export function ContribAnalysis({ t, guilds, contribsData, setContribsData }) {
   const deleteContrib = async (id) => {
     const entry = contribs.find((c) => c.id === id);
     try {
-      if (entry?.id) {
-        const res = await fetch(`/api/contributions?id=${entry.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error();
+      const contribPk =
+        entry?.id != null && Number(entry.id) !== Number(entry.member_id)
+          ? entry.id
+          : null;
+      if (contribPk) {
+        const res = await fetch(`/api/contributions?id=${contribPk}`, {
+          method: "DELETE",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "삭제 실패");
+        if (Array.isArray(data.list)) {
+          const key = String(guildId);
+          setContribsData((p) => ({ ...p, [key]: data.list, [guildId]: data.list }));
+        } else {
+          await refreshContribs();
+        }
+      } else {
+        await refreshContribs();
       }
-      setContribsData((p) => ({
-        ...p,
-        [guildId]: (p[guildId] || []).filter((c) => c.id !== id),
-      }));
       if (selected?.id === id) setSelected(null);
-      await refreshContribs();
     } catch {
       alert("삭제 실패 (contributions 테이블 확인)");
     }

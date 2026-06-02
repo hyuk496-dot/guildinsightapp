@@ -10,6 +10,7 @@ Guild Insight는 Supabase Postgres를 사용합니다. 다음 SQL 파일을 **Su
 | `002_contributions.sql` | `contributions` 테이블 (기여도 분석 페이지) | 선택 — 기여도 편집 사용 시 |
 | `004_gpt_reports.sql` | `gpt_reports` 테이블 (GPT 리포트 저장) | 선택 — GPT 리포트 페이지 사용 시 |
 | `005_user_isolation_rls.sql` | profiles 테이블 + guilds.owner_id + RLS 정책 (멀티유저 보안) | **필수** (멀티유저 운영) |
+| `009_contributions_rls_fix.sql` | `contributions` INSERT RLS·GRANT 보강 (기여도 첫 저장 오류 수정) | **필수** — 기여도 편집 사용 시 |
 | `001_scores_week_monday.sql` | (구) `week_monday` 컬럼만 추가하는 부분 마이그레이션 — `003`에 포함됨 | **건너뛰기** |
 
 ## 멀티유저 보안 셋업 (005)

@@ -2,17 +2,27 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
-import {
-  buildContribsFromScores,
-  groupContribsByGuildId,
-  applyContribPercents,
-} from "@/lib/contrib-utils";
+import { getAdminSupabase } from "@/lib/supabase-admin";
+import { requireGuildOwner, requireMemberInGuild } from "@/lib/guild-access";
+import { mergeGuildContribs } from "@/lib/contrib-utils";
 
 async function getSupabaseOrDeny() {
   const supabase = await getServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { supabase: null, deny: NextResponse.json({ error: "인증 필요" }, { status: 401 }) };
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { supabase: null, deny: NextResponse.json({ error: "인증 필요" }, { status: 401 }) };
+  }
   return { supabase, deny: null };
+}
+
+function getWriteClient(userSupabase) {
+  try {
+    return getAdminSupabase();
+  } catch {
+    return userSupabase;
+  }
 }
 
 async function loadScores(supabase) {
@@ -29,23 +39,59 @@ async function loadMembers(supabase, guildId) {
   return data || [];
 }
 
-async function loadFromScores(supabase, guildId) {
-  const scores = await loadScores(supabase);
-  if (guildId) {
-    const members = await loadMembers(supabase, guildId);
-    return buildContribsFromScores(scores, guildId, members);
+async function loadContributionRows(supabase, guildId = null) {
+  const { data, error } = await supabase.from("contributions").select("*");
+  if (error) {
+    if (/contributions/i.test(error.message || "")) return [];
+    throw error;
   }
-  const members = await loadMembers(supabase);
+  const rows = data || [];
+  if (!guildId) return rows;
+  return rows.filter((r) => String(r.guild_id) === String(guildId));
+}
+
+async function buildMergedGuildContribs(supabase, guildId) {
+  const [scores, members, contribRows] = await Promise.all([
+    loadScores(supabase),
+    loadMembers(supabase, guildId),
+    loadContributionRows(supabase, guildId),
+  ]);
+  return mergeGuildContribs({ members, scores, contribRows, guildId });
+}
+
+async function buildMergedAllGuildContribs(supabase) {
+  const [scores, members, allContribs] = await Promise.all([
+    loadScores(supabase),
+    loadMembers(supabase),
+    loadContributionRows(supabase),
+  ]);
+
   const guildIds = [...new Set(members.map((m) => String(m.guild_id)))];
   const grouped = {};
   guildIds.forEach((gid) => {
-    grouped[gid] = buildContribsFromScores(
+    grouped[gid] = mergeGuildContribs({
+      members: members.filter((m) => String(m.guild_id) === gid),
       scores,
-      gid,
-      members.filter((m) => String(m.guild_id) === gid)
-    );
+      contribRows: allContribs.filter((r) => String(r.guild_id) === gid),
+      guildId: gid,
+    });
   });
   return grouped;
+}
+
+async function findContributionRow(writeClient, guildId, memberId) {
+  const { data, error } = await writeClient
+    .from("contributions")
+    .select("*")
+    .eq("guild_id", Number(guildId))
+    .eq("member_id", Number(memberId))
+    .maybeSingle();
+
+  if (error?.message?.includes("contributions")) {
+    return { row: null, tableMissing: true, error };
+  }
+  if (error) throw error;
+  return { row: data, tableMissing: false, error: null };
 }
 
 export async function GET(request) {
@@ -55,36 +101,22 @@ export async function GET(request) {
   const guildId = searchParams.get("guild_id");
 
   try {
-    const { data: contribRows, error: contribErr } = await supabase
-      .from("contributions")
-      .select("*");
-
-    if (!contribErr && contribRows?.length > 0) {
-      if (guildId) {
-        const filtered = contribRows.filter(
-          (r) => String(r.guild_id) === String(guildId)
-        );
-        return NextResponse.json(applyContribPercents(filtered), { status: 200 });
-      }
-      return NextResponse.json(groupContribsByGuildId(contribRows), { status: 200 });
+    if (guildId) {
+      const list = await buildMergedGuildContribs(supabase, guildId);
+      return NextResponse.json(list, { status: 200 });
     }
-
-    const fromScores = await loadFromScores(supabase, guildId);
-    return NextResponse.json(fromScores, { status: 200 });
+    const grouped = await buildMergedAllGuildContribs(supabase);
+    return NextResponse.json(grouped, { status: 200 });
   } catch (error) {
     console.error("기여도 조회 에러:", error);
-    try {
-      const fromScores = await loadFromScores(supabase, guildId);
-      return NextResponse.json(fromScores, { status: 200 });
-    } catch {
-      return NextResponse.json(guildId ? [] : {}, { status: 500 });
-    }
+    return NextResponse.json(guildId ? [] : {}, { status: 500 });
   }
 }
 
 export async function PUT(request) {
   const { supabase, deny } = await getSupabaseOrDeny();
   if (deny) return deny;
+
   try {
     const { guild_id, member_id, nick, score, note } = await request.json();
     if (!member_id || !guild_id) {
@@ -99,19 +131,36 @@ export async function PUT(request) {
       return NextResponse.json({ error: "점수 형식 오류" }, { status: 400 });
     }
 
-    const { data: existing, error: findErr } = await supabase
-      .from("contributions")
-      .select("*")
-      .eq("guild_id", Number(guild_id))
-      .eq("member_id", Number(member_id))
-      .maybeSingle();
-
-    if (findErr?.message?.includes("contributions")) {
+    const ownerCheck = await requireGuildOwner(supabase, guild_id);
+    if (!ownerCheck.ok) {
       return NextResponse.json(
-        { error: "contributions 테이블이 없습니다. supabase/migrations/002_contributions.sql 실행 후 다시 시도하세요." },
+        { error: ownerCheck.error },
+        { status: ownerCheck.status }
+      );
+    }
+
+    const memberCheck = await requireMemberInGuild(supabase, guild_id, member_id);
+    if (!memberCheck.ok) {
+      return NextResponse.json({ error: memberCheck.error }, { status: 400 });
+    }
+
+    const writeClient = getWriteClient(supabase);
+    const { row: existing, tableMissing, error: findErr } = await findContributionRow(
+      writeClient,
+      guild_id,
+      member_id
+    );
+
+    if (tableMissing) {
+      return NextResponse.json(
+        {
+          error:
+            "contributions 테이블이 없습니다. supabase/migrations/002_contributions.sql 실행 후 다시 시도하세요.",
+        },
         { status: 400 }
       );
     }
+    if (findErr) throw findErr;
 
     const prevScore = existing?.score ?? 0;
     const delta = num - prevScore;
@@ -125,32 +174,36 @@ export async function PUT(request) {
     const payload = {
       guild_id: Number(guild_id),
       member_id: Number(member_id),
-      nick: nick || existing?.nick,
+      nick: nick || memberCheck.member.nick || existing?.nick,
       score: num,
       history,
+      updated_at: new Date().toISOString(),
     };
 
-    let result;
-    if (existing?.id) {
-      result = await supabase
-        .from("contributions")
-        .update(payload)
-        .eq("id", existing.id)
-        .select()
-        .single();
-    } else {
-      result = await supabase.from("contributions").insert([payload]).select().single();
+    const result = await writeClient
+      .from("contributions")
+      .upsert(payload, { onConflict: "guild_id,member_id" })
+      .select()
+      .single();
+
+    if (result.error) {
+      const msg = result.error.message || "";
+      if (/row-level security/i.test(msg)) {
+        return NextResponse.json(
+          {
+            error:
+              "기여도 저장 권한이 없습니다. 길드 소유자 계정인지 확인하고, Supabase에 009_contributions_rls_fix.sql 마이그레이션을 적용한 뒤 Vercel에 SUPABASE_SERVICE_ROLE_KEY가 설정되어 있는지 확인하세요.",
+          },
+          { status: 403 }
+        );
+      }
+      throw result.error;
     }
 
-    if (result.error) throw result.error;
-
-    const { data: all } = await supabase
-      .from("contributions")
-      .select("*")
-      .eq("guild_id", Number(guild_id));
+    const list = await buildMergedGuildContribs(supabase, guild_id);
 
     return NextResponse.json(
-      { row: result.data, list: applyContribPercents(all || []) },
+      { row: result.data, list },
       { status: 200 }
     );
   } catch (error) {
@@ -162,15 +215,40 @@ export async function PUT(request) {
 export async function DELETE(request) {
   const { supabase, deny } = await getSupabaseOrDeny();
   if (deny) return deny;
+
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     if (!id) {
       return NextResponse.json({ error: "id 필요" }, { status: 400 });
     }
-    const { error } = await supabase.from("contributions").delete().eq("id", id);
+
+    const writeClient = getWriteClient(supabase);
+    const { data: row, error: fetchErr } = await writeClient
+      .from("contributions")
+      .select("id, guild_id")
+      .eq("id", Number(id))
+      .maybeSingle();
+
+    if (fetchErr) throw fetchErr;
+    if (!row) {
+      return NextResponse.json({ error: "기여도 행을 찾을 수 없습니다." }, { status: 404 });
+    }
+
+    const ownerCheck = await requireGuildOwner(supabase, row.guild_id);
+    if (!ownerCheck.ok) {
+      return NextResponse.json(
+        { error: ownerCheck.error },
+        { status: ownerCheck.status }
+      );
+    }
+
+    const { error } = await writeClient.from("contributions").delete().eq("id", row.id);
     if (error) throw error;
-    return NextResponse.json({ success: true }, { status: 200 });
+
+    const list = await buildMergedGuildContribs(supabase, row.guild_id);
+
+    return NextResponse.json({ success: true, list }, { status: 200 });
   } catch (error) {
     console.error("기여도 삭제 에러:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

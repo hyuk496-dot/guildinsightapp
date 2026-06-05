@@ -150,7 +150,7 @@ export function Dashboard({ t, guild }) {
     weekLabels.forEach((l, i) => {
       if (!pts[i]) return;
       ctx.fillStyle = t.chartLabel;
-      ctx.font = `8px 'Courier New'`;
+      ctx.font = `400 8px 'Courier New'`;
       ctx.textAlign = "center";
       ctx.fillText(l, pts[i].x, H - 5);
     });
@@ -167,7 +167,7 @@ export function Dashboard({ t, guild }) {
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px" }}>
       <div style={{ fontSize: 15, fontWeight: 500, color: t.text, marginBottom: 3 }}>{g.name} 대시보드</div>
-      <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 16 }}>
+      <div style={{ fontSize: 10, fontWeight: 400, color: t.textMuted, marginBottom: 16 }}>
         {g.game} · 랭킹 #{g.rank} · 등록일 {g.created}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
@@ -182,7 +182,7 @@ export function Dashboard({ t, guild }) {
               transition: TR,
             }}
           >
-            <div style={{ fontSize: 9, color: t.textMuted, letterSpacing: "0.12em", marginBottom: 4 }}>{m.label}</div>
+            <div style={{ fontSize: 9, fontWeight: 400, color: t.textMuted, letterSpacing: "0.12em", marginBottom: 4 }}>{m.label}</div>
             <div style={{ fontSize: 21, fontWeight: 500, color: t.text, lineHeight: 1 }}>{m.val}</div>
             <div style={{ fontSize: 10, marginTop: 4, color: m.up ? t.up : t.dn }}>{m.delta}</div>
           </div>
@@ -227,6 +227,7 @@ export function Dashboard({ t, guild }) {
                     border: `1px solid ${c === chartContent ? t.borderStrong : t.border}`,
                     background: c === chartContent ? t.accentFaint : "transparent",
                     color: c === chartContent ? t.accent : t.textMuted,
+                    fontWeight: 400,
                     cursor: "pointer",
                     fontFamily: "'Courier New',monospace",
                     transition: "all 0.15s",
@@ -251,7 +252,7 @@ export function Dashboard({ t, guild }) {
             >
               {chartContent} 기준
             </span>
-            <span style={{ fontSize: 10, color: t.textMuted }}>
+            <span style={{ fontSize: 10, fontWeight: 400, color: t.textMuted }}>
               최신: <strong style={{ color: t.up }}>{latestScore.toLocaleString()}</strong>
             </span>
             <span style={{ fontSize: 10, color: scoreDelta >= 0 ? t.up : t.dn }}>
@@ -294,10 +295,10 @@ export function Dashboard({ t, guild }) {
             </div>
           </div>
           {chartLoading && (
-            <div style={{ fontSize: 10, color: t.textMuted, padding: "8px 0" }}>랭킹 불러오는 중...</div>
+            <div style={{ fontSize: 10, fontWeight: 400, color: t.textMuted, padding: "8px 0" }}>랭킹 불러오는 중...</div>
           )}
           {!chartLoading && (!chartData?.serverRanks?.length ? (
-            <div style={{ fontSize: 10, color: t.textMuted, padding: "8px 0" }}>
+            <div style={{ fontSize: 10, fontWeight: 400, color: t.textMuted, padding: "8px 0" }}>
               {chartContent} 점수 데이터가 없습니다. 점수 관리에서 입력 후 표시됩니다.
             </div>
           ) : (

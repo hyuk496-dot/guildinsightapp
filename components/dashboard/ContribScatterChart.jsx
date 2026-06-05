@@ -108,6 +108,7 @@ export function ContribScatterChart({ t, members, scoresByContent }) {
                 alignItems: "center",
                 gap: 4,
                 fontSize: 9,
+                fontWeight: 400,
                 color: t.textSub,
                 padding: "2px 8px",
                 borderRadius: 20,
@@ -125,7 +126,7 @@ export function ContribScatterChart({ t, members, scoresByContent }) {
                 }}
               />
               {job}
-              <span style={{ color: t.textMuted, fontSize: 9 }}>·{group.points.length}</span>
+              <span style={{ color: t.textMuted, fontSize: 9, fontWeight: 400 }}>·{group.points.length}</span>
             </div>
           ))}
         </div>
@@ -140,6 +141,7 @@ export function ContribScatterChart({ t, members, scoresByContent }) {
               alignItems: "center",
               justifyContent: "center",
               fontSize: 11,
+              fontWeight: 400,
               color: t.textMuted,
             }}
           >

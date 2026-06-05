@@ -55,6 +55,12 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* 앱 테마 토글(data-theme) — body antialiased 상속 해제, 다크 모드 렌더링 유지 */
+[data-theme="dark"] {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
 /* 앱 다크/라이트 — native select·option 대비 */
 [data-theme="dark"] select {
   color-scheme: dark;

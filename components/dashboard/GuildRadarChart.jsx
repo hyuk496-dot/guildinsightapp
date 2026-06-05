@@ -91,6 +91,7 @@ export function GuildRadarChart({ t, members, scoresByContent, contents }) {
               alignItems: "center",
               justifyContent: "center",
               fontSize: 11,
+              fontWeight: 400,
               color: t.textMuted,
             }}
           >

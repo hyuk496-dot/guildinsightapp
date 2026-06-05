@@ -2,48 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { THEMES, TR } from "@/lib/theme";
 import { selectStyle, optionStyle } from "@/lib/styles";
 import { exportElementToPdf } from "@/lib/export-report-pdf";
-
-// ─── THEME ───────────────────────────────────────────────────────────────────
-const THEMES = {
-  dark: {
-    bg:"#080c14",bgCard:"#0d1a2a",bgAlt:"#0a1520",bgHover:"#111f30",
-    border:"rgba(0,200,255,0.12)",borderStrong:"rgba(0,200,255,0.35)",
-    accent:"#00c8ff",accentDim:"rgba(0,200,255,0.55)",
-    accentFaint:"rgba(0,200,255,0.08)",accentFainter:"rgba(0,200,255,0.04)",
-    text:"#e8f4ff",textSub:"rgba(180,210,240,0.7)",textMuted:"rgba(0,200,255,0.4)",
-    up:"#4cff91",dn:"#ff5b5b",upBg:"rgba(76,255,145,0.08)",
-    navBg:"#0d1a2a",navBorder:"rgba(0,200,255,0.1)",
-    sideActive:"rgba(0,200,255,0.10)",
-    pBg:"rgba(0,200,255,0.1)",pBar:"#00c8ff",
-    rptBg:"rgba(0,200,255,0.04)",rptBorder:"rgba(0,200,255,0.15)",rptText:"rgba(140,210,240,0.8)",
-    inputBg:"rgba(0,200,255,0.05)",inputBorder:"rgba(0,200,255,0.2)",
-    radarRgb:"0,200,255",
-    dColors:["#00c8ff","#EF9F27","#4cff91","#ff6fa8","#a89df5","#5f7a94"],
-    avColors:[["rgba(0,200,255,0.15)","#00c8ff"],["rgba(239,159,39,0.15)","#EF9F27"],["rgba(76,255,145,0.15)","#4cff91"],["rgba(212,83,126,0.15)","#ff6fa8"],["rgba(127,119,221,0.15)","#a89df5"],["rgba(95,122,148,0.15)","#7a9ab5"]],
-    chartLine:"#00c8ff",chartFill:"rgba(0,200,255,0.08)",chartGrid:"rgba(0,200,255,0.07)",chartLabel:"rgba(0,200,255,0.35)",
-    modalBg:"rgba(4,10,22,0.88)",
-  },
-  light: {
-    bg:"#f0f4f8",bgCard:"#ffffff",bgAlt:"#f8fafc",bgHover:"#edf2f8",
-    border:"rgba(24,95,165,0.12)",borderStrong:"rgba(24,95,165,0.3)",
-    accent:"#185FA5",accentDim:"rgba(24,95,165,0.55)",
-    accentFaint:"rgba(24,95,165,0.07)",accentFainter:"rgba(24,95,165,0.03)",
-    text:"#0c1a2e",textSub:"rgba(20,50,90,0.65)",textMuted:"rgba(24,95,165,0.45)",
-    up:"#1a7a3c",dn:"#c0392b",upBg:"rgba(26,122,60,0.07)",
-    navBg:"#ffffff",navBorder:"rgba(24,95,165,0.1)",
-    sideActive:"rgba(24,95,165,0.08)",
-    pBg:"rgba(24,95,165,0.1)",pBar:"#185FA5",
-    rptBg:"rgba(24,95,165,0.03)",rptBorder:"rgba(24,95,165,0.12)",rptText:"rgba(20,50,90,0.7)",
-    inputBg:"rgba(24,95,165,0.04)",inputBorder:"rgba(24,95,165,0.2)",
-    radarRgb:"24,95,165",
-    dColors:["#185FA5","#c87200","#1a7a3c","#a0284f","#5145b8","#7a8fa0"],
-    avColors:[["#dbeeff","#185FA5"],["#fff3db","#9c5e00"],["#dbf5e9","#1a7a3c"],["#ffe0ed","#a0284f"],["#eae8ff","#5145b8"],["#e8edf2","#4a6070"]],
-    chartLine:"#185FA5",chartFill:"rgba(24,95,165,0.07)",chartGrid:"rgba(24,95,165,0.07)",chartLabel:"rgba(24,95,165,0.4)",
-    modalBg:"rgba(200,210,225,0.75)",
-  },
-};
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const GUILDS_INIT = [
@@ -155,7 +116,6 @@ const GPT_REPORTS = [
    chips:["MVP: LunaX","길드전 +22%","총력전 개선 필요"]},
 ];
 
-const TR = "background 0.3s, color 0.3s, border-color 0.3s";
 const NAV_ITEMS = [
   {id:"dashboard",label:"대시보드",icon:"◼",section:"메인"},
   {id:"guild",label:"길드 관리",icon:"◎",section:"메인"},
@@ -342,16 +302,16 @@ function Dashboard({t,guild}){
     ctx.lineTo(pts[pts.length-1].x,H-bot);ctx.lineTo(pts[0].x,H-bot);ctx.closePath();
     ctx.fillStyle=t.chartFill;ctx.fill();
     pts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.fillStyle=t.chartLine;ctx.fill();});
-    weeks.forEach((l,i)=>{ctx.fillStyle=t.chartLabel;ctx.font=`8px 'Courier New'`;ctx.textAlign="center";ctx.fillText(l,pts[i].x,H-5);});
+    weeks.forEach((l,i)=>{ctx.fillStyle=t.chartLabel;ctx.font=`400 8px 'Courier New'`;ctx.textAlign="center";ctx.fillText(l,pts[i].x,H-5);});
   },[t,chartContent]);
   return(
     <div style={{flex:1,overflowY:"auto",padding:"18px 22px"}}>
       <div style={{fontSize:15,fontWeight:500,color:t.text,marginBottom:3}}>{guild.name} 대시보드</div>
-      <div style={{fontSize:10,color:t.textMuted,marginBottom:16}}>{guild.game} · 랭킹 #{guild.rank} · 등록일 {guild.created}</div>
+      <div style={{fontSize:10,fontWeight:400,color:t.textMuted,marginBottom:16}}>{guild.game} · 랭킹 #{guild.rank} · 등록일 {guild.created}</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
         {mets.map((m,i)=>(
           <div key={i} style={{background:t.bgCard,border:`1px solid ${t.border}`,borderRadius:10,padding:"13px 15px",transition:TR}}>
-            <div style={{fontSize:9,color:t.textMuted,letterSpacing:"0.12em",marginBottom:4}}>{m.label}</div>
+            <div style={{fontSize:9,fontWeight:400,color:t.textMuted,letterSpacing:"0.12em",marginBottom:4}}>{m.label}</div>
             <div style={{fontSize:21,fontWeight:500,color:t.text,lineHeight:1}}>{m.val}</div>
             <div style={{fontSize:10,marginTop:4,color:m.up?t.up:t.dn}}>{m.delta}</div>
           </div>
@@ -375,7 +335,7 @@ function Dashboard({t,guild}){
             <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"flex-end"}}>
               {Object.keys(DASH_SCORES_BY_CONTENT).map(c=>(
                 <button key={c} onClick={()=>setChartContent(c)}
-                  style={{fontSize:9,padding:"2px 8px",borderRadius:20,border:`1px solid ${c===chartContent?t.borderStrong:t.border}`,background:c===chartContent?t.accentFaint:"transparent",color:c===chartContent?t.accent:t.textMuted,cursor:"pointer",fontFamily:"'Courier New',monospace",transition:"all 0.15s"}}>
+                  style={{fontSize:9,padding:"2px 8px",borderRadius:20,border:`1px solid ${c===chartContent?t.borderStrong:t.border}`,background:c===chartContent?t.accentFaint:"transparent",color:c===chartContent?t.accent:t.textMuted,fontWeight:400,cursor:"pointer",fontFamily:"'Courier New',monospace",transition:"all 0.15s"}}>
                   {c}
                 </button>
               ))}
@@ -384,7 +344,7 @@ function Dashboard({t,guild}){
           {/* 현재 선택 컨텐츠 배지 */}
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
             <span style={{fontSize:10,padding:"2px 10px",background:t.accentFaint,border:`1px solid ${t.borderStrong}`,color:t.accent,borderRadius:20,fontWeight:500}}>{chartContent} 기준</span>
-            <span style={{fontSize:10,color:t.textMuted}}>최신: <strong style={{color:t.up}}>{latestScore.toLocaleString()}</strong></span>
+            <span style={{fontSize:10,fontWeight:400,color:t.textMuted}}>최신: <strong style={{color:t.up}}>{latestScore.toLocaleString()}</strong></span>
             <span style={{fontSize:10,color:scoreDelta>=0?t.up:t.dn}}>{scoreDelta>=0?"▲":"▼"} {Math.abs(scoreDelta)} ({scoreDeltaPct}%)</span>
           </div>
           <div style={{height:120}}><canvas ref={cvRef} style={{width:"100%",height:"100%",display:"block"}}/></div>
@@ -420,7 +380,7 @@ function Dashboard({t,guild}){
                       ? <span style={{color:t.up}}>▲{diff}</span>
                       : diff<0
                         ? <span style={{color:t.dn}}>▼{Math.abs(diff)}</span>
-                        : <span style={{color:t.textMuted,fontSize:12}}>—</span>
+                        : <span style={{color:t.textMuted,fontSize:12,fontWeight:400}}>—</span>
                     }
                   </span>
                   <span style={{flex:1,fontSize:11,color:r.ours?t.accent:t.text,fontWeight:r.ours?500:400}}>{r.name}{r.ours?" ★":""}</span>
